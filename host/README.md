@@ -127,6 +127,11 @@ python3 host/speedtest.py --pattern random --seed 7 -y
 擦除和写入会覆盖目标区域，默认需要交互确认（非交互环境要加 `-y`）。
 `--addr` 与 `--size` 都要求 4 KiB 对齐。
 
+> **地址字节序的坑**：NOR 的 24 位地址是 MSB first，而协议里流式命令的
+> `count` 字段是小端。两者不要混用。小于 64 KiB 的地址形如 `0xNN00`，
+> 大小端恰好对称，所以只在 0~64 KiB 测是发现不了的 —— 建议至少跑一次
+> `--size 64K --addr 0x10000`（或更大的地址）来覆盖高字节。
+
 输出示例（W25Q32，12 MHz，VirtualBox 直通）：
 
 ```

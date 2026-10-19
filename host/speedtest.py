@@ -64,7 +64,17 @@ ST_OK = 0x00
 # ------------------------------------------------------------------ 小工具
 
 def u24(value):
+    """24 位小端：协议里的 count 字段是低字节在前。"""
     return bytes((value & 0xFF, (value >> 8) & 0xFF, (value >> 16) & 0xFF))
+
+
+def addr24(addr):
+    """NOR 的 24 位地址是 MSB first（A23..A0）。
+
+    注意不要和 count 的 u24() 混用：小于 64 KiB 的地址形如 0xNN00，
+    大小端刚好对称，所以这个错误在那一段测不出来。
+    """
+    return bytes(((addr >> 16) & 0xFF, (addr >> 8) & 0xFF, addr & 0xFF))
 
 
 def parse_size(text):
@@ -107,8 +117,10 @@ def make_pattern(addr, size, kind, seed=0x5A):
         block = bytes(rng.getrandbits(8) for _ in range(256))
         return (block * (size // 256 + 1))[:size]
 
-    base = ((addr & 0xFF) + ((addr >> 8) & 0xFF) + ((addr >> 16) & 0xFF)) & 0xFF
-    return bytes(((i * 0x1D) + base) & 0xFF for i in range(size))
+    # 每个 256 字节页内仍是 0..255 的一个置换（便于发现位粘连），但相位
+    # 由绝对地址决定：不同页的数据不同，地址回绕/错位会被校验发现。
+    base = ((((addr >> 8) & 0xFF) * 0x07) + (((addr >> 16) & 0xFF) * 0x13)) & 0xFF
+    return bytes(((((addr + i) * 0x1D) + base) & 0xFF) for i in range(size))
 
 
 # ------------------------------------------------------------------ 流式命令
@@ -177,7 +189,7 @@ def erase_sector(br, addr):
     先发 WREN（0x06）并让 CS 拉高，让芯片锁存写使能。"""
     t0 = time.perf_counter()
     stream_write(br, bytes([NOR_WREN]), b"")
-    stream_write(br, bytes([NOR_SE]) + u24(addr), b"")
+    stream_write(br, bytes([NOR_SE]) + addr24(addr), b"")
     t_issue = time.perf_counter() - t0
     _sr, t_busy, _polls = wait_ready(br)
     return t_issue + t_busy, t_busy
@@ -191,7 +203,7 @@ def program_page(br, addr, data):
     """
     stream_write(br, bytes([NOR_WREN]), b"")
     t0 = time.perf_counter()
-    stream_write(br, bytes([NOR_PP]) + u24(addr), data)
+    stream_write(br, bytes([NOR_PP]) + addr24(addr), data)
     t_send = time.perf_counter() - t0
     _sr, t_busy, _polls = wait_ready(br)
     return t_send, t_busy
@@ -199,7 +211,7 @@ def program_page(br, addr, data):
 
 def read_region(br, addr, size):
     t0 = time.perf_counter()
-    data = stream_read(br, bytes([NOR_READ]) + u24(addr), size)
+    data = stream_read(br, bytes([NOR_READ]) + addr24(addr), size)
     return data, time.perf_counter() - t0
 
 
