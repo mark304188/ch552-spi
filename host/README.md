@@ -178,6 +178,34 @@ python3 host/speedtest.py --engine fw -y   # 固件内循环（NOR 加速命令�
 > 注意：擦除和编程前都必须先发 WREN（0x06）。脚本已经处理；自己写上位机
 > 时最容易漏掉这一步，表现为“命令都成功但数据没变”。
 
+## `nand_speedtest.py` — SPI NAND ID 探测与测速
+
+针对 DS35M1GA（1.8V）/ DS35Q1GA（3.3V），1 Gbit，页 2048+64，块 64 页。
+默认**关闭片上 ECC**（`Set Features B0h = 0x00`），测的是纯 SPI/USB 路径。
+
+```bash
+python3 host/nand_speedtest.py --id-only   # 只读 ID / 状态 / 配置寄存器
+python3 host/nand_speedtest.py -y          # 4 个块（512 KiB 主区）读写测速
+python3 host/nand_speedtest.py --blocks 16 --div 2 -y
+python3 host/nand_speedtest.py --engine host -y   # 主机逐页驱动（对比用）
+python3 host/nand_speedtest.py --no-erase -y      # 块已擦除时直接写
+```
+
+流程：复位 → `9Fh` 读 ID → 关 ECC → 找连续好块 → `D8h` 擦除 →
+整页编程（2112 B/页）→ 读回校验。
+
+要点：
+
+- **ID**：`E5 21` = DS35M1GA（1.8V），`E5 71` = DS35Q1GA（3.3V）。
+  脚本会打印对应型号；1.8V 器件会额外提示确认 IO 电平。
+- **ECC**：脚本显式关闭并回读 `B0h` 确认 bit4=0。开启 ECC 时读回数据
+  还要检查 `SR[5:4]`，本工具不做。
+- **OOB**：写入时 OOB 全填 `0xFF`，避免把坏块标记（OOB 第 1 字节）写坏；
+  校验只比较主区 2048 B。
+- **坏块**：按手册用块内第 1/2 页 OOB 第 1 字节判断，自动跳过并寻找
+  连续好块。
+- 行地址 = `block * 64 + page`（RA[15:6]=块，RA[5:0]=页）。
+
 ## 后续扩展建议
 
 如果之后要在本目录里继续做完整工具，建议结构：

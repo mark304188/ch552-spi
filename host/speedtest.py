@@ -213,7 +213,7 @@ def nor_program_fw(br, addr, data, chunk=DATA_CHUNK):
 def read_status(br):
     """RDSR。发 0x05 的那个字节 MISO 无效，真实状态在第二个字节。"""
     data = stream_read(br, bytes([NOR_RDSR]), 2)
-    return data[1]
+    return data[0]
 
 
 def wait_ready(br, timeout=5.0):
