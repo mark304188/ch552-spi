@@ -14,6 +14,8 @@
 依赖::
 
     pip install pyusb
+    # Windows 还要装 libusb 的 DLL（pyusb 自己不带）：
+    pip install libusb-package
 
 Linux 需要 udev 权限（见 README 的 udev 规则），或直接用 sudo 运行；
 Windows 需要先用 Zadig 把接口 0 绑定到 WinUSB。
@@ -29,6 +31,21 @@ try:
     import usb.util
 except ImportError:
     sys.exit("缺少 pyusb，请先执行: pip install pyusb")
+
+# Windows 的 pyusb 需要一个 libusb-1.0.dll；libusb-package 自带一份，
+# 装上后这里自动使用。Linux/macOS 走 pyusb 默认后端（backend=None）。
+try:
+    import libusb_package
+    BACKEND = libusb_package.get_libusb1_backend()
+except Exception:
+    BACKEND = None
+
+# Windows 控制台/重定向输出默认不是 UTF-8，中文和箭头符号会报
+# UnicodeEncodeError；统一改成 UTF-8（失败也不影响功能）。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 
 # ---------------------------------------------------------------- 设备标识
@@ -108,7 +125,13 @@ class Bridge:
             # libusb builds do not implement the call at all.
             pass
 
-        usb.util.claim_interface(dev, INTERFACE)
+        try:
+            usb.util.claim_interface(dev, INTERFACE)
+        except usb.core.USBError as exc:
+            raise RuntimeError(
+                "无法占用接口 0: %s\n"
+                "  Windows: 用 Zadig 把接口 0 绑定到 WinUSB 后拔插一次\n"
+                "  Linux  : 检查 udev 规则，或用 sudo 运行" % exc)
 
     # ------------------------------------------------------------ 底层收发
     def send(self, cmd, payload=b""):
@@ -269,9 +292,10 @@ def main():
     if args.div < 2:
         sys.exit("--div 最小为 2（SCK = Fsys/2）")
 
-    dev = usb.core.find(idVendor=VID, idProduct=PID)
+    dev = usb.core.find(idVendor=VID, idProduct=PID, backend=BACKEND)
     if dev is None:
-        if usb.core.find(idVendor=BOOT_VID, idProduct=BOOT_PID) is not None:
+        if usb.core.find(idVendor=BOOT_VID, idProduct=BOOT_PID,
+                         backend=BACKEND) is not None:
             sys.exit("找到的是 WCH bootloader（0x4348:0x55E0），"
                      "说明设备还没运行本固件。")
         sys.exit("未找到设备 %04X:%04X\n"
@@ -281,7 +305,7 @@ def main():
 
     try:
         br = Bridge(dev, args.verbose)
-    except usb.core.USBError as exc:
+    except (usb.core.USBError, RuntimeError) as exc:
         sys.exit("USB 错误: %s" % exc)
 
     # The EP0 status request tells us whether the chip is running a build

@@ -25,7 +25,14 @@ import usb.core
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from nor_id import Bridge, FSYS_MHZ, VID, PID  # noqa: E402
+from nor_id import BACKEND, Bridge, FSYS_MHZ, VID, PID  # noqa: E402
+
+# 中文输出在 Windows 重定向时也需要 UTF-8（nor_id 已处理 stdout，
+# 这里保证 stderr 一致）。
+try:
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 # ------------------------------------------------------------------ 协议常量
 
@@ -225,7 +232,7 @@ def compare(written, read_back):
 # ------------------------------------------------------------------ 入口
 
 def find_device():
-    dev = usb.core.find(idVendor=VID, idProduct=PID)
+    dev = usb.core.find(idVendor=VID, idProduct=PID, backend=BACKEND)
     if dev is None:
         sys.exit("未找到设备 %04X:%04X\n"
                  "  Linux  : 检查 udev 规则，或用 sudo 运行\n"
@@ -291,7 +298,7 @@ def main():
     dev = find_device()
     try:
         br = Bridge(dev, args.verbose)
-    except usb.core.USBError as exc:
+    except (usb.core.USBError, RuntimeError) as exc:
         sys.exit("USB 错误: %s" % exc)
 
     st = br.vendor_status()

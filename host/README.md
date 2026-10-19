@@ -71,6 +71,44 @@ JEDEC ID : FF FF FF FF
 
 完整的帧格式和命令表见 [`../docs/protocol.md`](../docs/protocol.md)。
 
+## Windows
+
+两个脚本都是纯 pyusb + 标准库，没有平台相关代码，可以直接跑，但需要先
+准备好两样东西：
+
+```powershell
+pip install pyusb libusb-package
+```
+
+`libusb-package` 提供 pyusb 在 Windows 上需要的 `libusb-1.0.dll`；脚本会
+自动检测并把它作为后端（Linux/macOS 上不需要，装了也不影响）。
+
+然后用 [Zadig](https://zadig.akeo.ie/) 给接口绑定 WinUSB：
+
+1. `Options → List All Devices`
+2. 选中 `ch552-spi (Interface 0)`（`1a86:5507`）
+3. 目标驱动选 `WinUSB`，点 `Replace Driver`
+4. 拔插一次设备
+
+之后：
+
+```powershell
+python host\nor_id.py
+python host\speedtest.py --size 4K -y
+```
+
+常见问题：
+
+| 现象 | 原因 |
+|---|---|
+| `未找到设备 1A86:5507` | 没绑定 WinUSB，或设备没插好 |
+| `无法占用接口 0: Access denied` | 被其他程序占用，或 Zadig 绑定后没拔插 |
+| `No backend available` | 缺 `libusb-1.0.dll`，装 `libusb-package` |
+| 烧录后设备消失 | 正常：`CMD_BOOTLOADER` 会让它变成 `4348:55E0` |
+
+注意：Windows 下每次 bulk 往返的延迟通常比 Linux 高，`speedtest.py` 的
+写入数字会受它影响；`--div` 对读吞吐的影响仍然成立。
+
 ## `speedtest.py` — 擦除 / 写入 / 读回速度测试
 
 一条命令跑完「擦除 → 逐页编程 → 读回校验」，每个阶段单独计时。默认走

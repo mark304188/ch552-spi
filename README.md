@@ -154,9 +154,16 @@ sudo udevadm trigger
 
 规则内容是给 `plugdev` 组读写权限（`MODE="0660", GROUP="plugdev"`）。
 
-Windows 下用 Zadig 给该接口绑定 WinUSB（或 libusbK），之后 libusb 的
-Windows 后端即可直接使用；因为接口是厂商自定义类，不会与任何系统驱动
-冲突。
+Windows 下需要两步：
+
+1. `pip install pyusb libusb-package` —— 后者提供 `libusb-1.0.dll`，
+   pyusb 自己不带（脚本会自动检测并使用）。
+2. 用 [Zadig](https://zadig.akeo.ie/) 给接口 0 绑定 WinUSB：
+   `Options → List All Devices` → 选 `ch552-spi (Interface 0)` →
+   `WinUSB` → `Replace Driver`，完成后拔插一次。
+
+接口是厂商自定义类，不会与任何系统驱动冲突。烧录用的 WCH bootloader 是
+另一个 VID:PID（`4348:55E0`），不受这个绑定影响。
 
 ### 现成的探测工具
 
