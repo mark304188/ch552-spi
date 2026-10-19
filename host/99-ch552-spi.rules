@@ -1,0 +1,12 @@
+# CH552 USB-SPI bridge (idVendor 0x1A86, idProduct 0x5507)
+#
+# Grants members of the "plugdev" group read/write access to the device, so
+# the host tools (host/nor_id.py etc.) can run without root.
+#
+# Install:
+#   sudo cp host/99-ch552-spi.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+# then unplug and replug the bridge.
+
+SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="5507", MODE="0660", GROUP="plugdev"

@@ -48,6 +48,12 @@ CMD_SET_SPI_CFG = 0x04
 CMD_CS = 0x08
 CMD_SPI_XFER = 0x11
 
+# Vendor control request (over EP0) that reports firmware/endpoint state.
+# It keeps working when the bulk endpoints are dead, so it is used to tell
+# "old firmware" apart from "wrong wiring".
+VENDOR_REQ_STATUS = 0x42
+VENDOR_STATUS_LEN = 16
+
 ST_OK = 0x00
 
 FSYS_MHZ = 24.0
@@ -88,8 +94,11 @@ class Bridge:
             pass
 
         try:
-            usb.util.detach_kernel_driver(dev, INTERFACE)
+            if dev.is_kernel_driver_active(INTERFACE):
+                dev.detach_kernel_driver(INTERFACE)
         except (usb.core.USBError, NotImplementedError):
+            # Windows/WinUSB has no kernel driver to detach, and some
+            # libusb builds do not implement the call at all.
             pass
 
         usb.util.claim_interface(dev, INTERFACE)
@@ -112,6 +121,19 @@ class Bridge:
         if self.verbose:
             print("  <- " + bytes(buf).hex(" "))
         return bytes(buf)
+
+    # ------------------------------------------------------------ 状态查询
+    def vendor_status(self):
+        """读固件状态（走 EP0，不依赖 bulk）。不支持时返回 None。"""
+        try:
+            raw = self.dev.ctrl_transfer(0xC0, VENDOR_REQ_STATUS, 0, 0,
+                                         VENDOR_STATUS_LEN, TIMEOUT_MS)
+        except usb.core.USBError:
+            return None
+        raw = bytes(raw)
+        if len(raw) < VENDOR_STATUS_LEN or raw[:3] != b"CSP":
+            return None
+        return raw
 
     # ------------------------------------------------------------ 命令封装
     def ping(self):
@@ -229,6 +251,8 @@ def main():
                     help="SPI 模式")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="打印原始 USB 帧")
+    ap.add_argument("--status", action="store_true",
+                    help="只读固件状态（EP0），不做 SPI 操作")
     args = ap.parse_args()
 
     if args.div < 2:
@@ -246,12 +270,40 @@ def main():
 
     try:
         br = Bridge(dev, args.verbose)
+    except usb.core.USBError as exc:
+        sys.exit("USB 错误: %s" % exc)
+
+    # The EP0 status request tells us whether the chip is running a build
+    # that knows about the bulk protocol at all.
+    st = br.vendor_status()
+    if st is not None:
+        print("桥       : 固件 v%d.%d, 协议 v%d"
+              % (st[4], st[5], st[3]))
+        if args.status or args.verbose:
+            print("寄存器   : UEP2_3_MOD=%02X UEP2_CTRL=%02X UEP3_CTRL=%02X"
+                  % (st[6], st[7], st[8]))
+            print("           UEP3_DMA_L=%02X frame_ready=%d rx_half=%d"
+                  " in=%02X USB_CTRL=%02X UDEV_CTRL=%02X"
+                  % (st[9], st[10], st[11], st[12], st[13], st[14]))
+        if args.status:
+            return 0
+    else:
+        print("桥       : 未响应固件状态请求（EP0）")
+        print("           → 芯片里可能烧的是旧版本固件，请重新烧录当前 build")
+        if args.status:
+            return 1
+
+    try:
         proto_ver = br.ping()
         br.set_spi(args.div, args.mode == 3)
         fw_major, fw_minor, mode3, div = br.info()
         jdec = br.jedec_id()
     except usb.core.USBError as exc:
         text = str(exc)
+        if getattr(exc, "errno", 0) == -7 or "timed out" in text.lower():
+            sys.exit("bulk 端点无响应（超时）。\n"
+                     "  1) 芯片可能烧的是旧固件：重新烧录 build/ch552_spi_bridge.hex\n"
+                     "  2) 也可能是 USB 线/供电问题，换一个端口试试")
         if ("Access" in text or "Permission" in text
                 or getattr(exc, "errno", 0) in (-3, 13)):
             sys.exit("USB 权限不足。\n"
@@ -261,7 +313,6 @@ def main():
     except RuntimeError as exc:
         sys.exit(str(exc))
 
-    print("桥       : 固件 v%d.%d, 协议 v%d" % (fw_major, fw_minor, proto_ver))
     print("SPI      : mode %d, SCK = %.1f MHz (div=%d)"
           % (3 if mode3 else 0, FSYS_MHZ / div, div))
     print()

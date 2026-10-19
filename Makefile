@@ -27,6 +27,9 @@ XRAM_LOC ?= 0x0200
 SDCC ?= sdcc
 PACKIHX ?= packihx
 OBJCOPY ?= objcopy
+# Open-source ISP tool for the WCH bootloader (pip install ch55xtool).
+# Put the board into ISP mode first (hold BOOT while plugging in USB).
+FLASHER ?= ch55xtool
 
 SRC_DIR := firmware/src
 INC_DIR := firmware/include
@@ -85,11 +88,7 @@ $(BUILD_DIR)/$(PROJECT).bin: $(BUILD_DIR)/$(PROJECT).ihx
 	$(OBJCOPY) -I ihex -O binary $< $@
 
 flash: $(BUILD_DIR)/$(PROJECT).bin
-	@echo "---"
-	@echo "Flash $< with one of:"
-	@echo "  WCHISPTool (Windows)"
-	@echo "  wchisptool -g -f $< (librech551 / ch552tool, Linux & macOS)"
-	@echo "---"
+	$(FLASHER) -f $< -r
 
 clean:
 	rm -rf $(BUILD_DIR)

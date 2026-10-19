@@ -101,6 +101,39 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="5507", MODE="0666"
 >   以「主机的下一次 OUT 传输被接受」作为完成标志，能显著降低
 >   页编程循环的往返次数。
 
+### 2.3 固件状态查询（EP0 厂商请求，可选）
+
+除了 bulk 通道，设备还实现了一个**走 EP0 的厂商请求**，用来在不依赖
+bulk 端点的情况下确认固件版本和端点寄存器状态。上位机排查问题时很有用。
+
+| 字段 | 值 |
+|---|---|
+| `bmRequestType` | `0xC0`（IN，vendor，device） |
+| `bRequest` | `0x42` |
+| `wValue` / `wIndex` | `0` / `0` |
+| `wLength` | 16 |
+
+返回 16 字节：
+
+| 偏移 | 内容 |
+|---|---|
+| 0..2 | `'C' 'S' 'P'` |
+| 3 | 协议版本 |
+| 4 / 5 | 固件 major / minor |
+| 6 | `UEP2_3_MOD` |
+| 7 | `UEP2_CTRL` |
+| 8 | `UEP3_CTRL` |
+| 9 | `UEP3_DMA_L` |
+| 10 | `ep3_frame_ready` |
+| 11 | `rx_half` |
+| 12 | `in_half` / `in_armed` / `in_pre_len` 位域 |
+| 13 | `USB_CTRL` |
+| 14 | `UDEV_CTRL` |
+| 15 | 保留 |
+
+固件不支持该请求时会 STALL。旧版本固件（没有这个请求）也会 STALL，
+因此可以拿它区分"固件太旧"和"接线/硬件问题"。
+
 ---
 
 ## 3. 命令一览

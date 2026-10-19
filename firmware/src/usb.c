@@ -53,7 +53,7 @@ uint8_t __xdata __at(0x0140) usb_reply_buf[REPLY_BUF_SIZE];
  * Windows. */
 __code uint8_t dev_desc[] = {
     0x12, 0x01,     /* bLength, bDescriptorType               */
-    0x10, 0x01,     /* bcdUSB 2.00                            */
+    0x00, 0x02,     /* bcdUSB 2.00                            */
     0x00,           /* bDeviceClass     : defined per interface */
     0x00,           /* bDeviceSubClass                        */
     0x00,           /* bDeviceProtocol                        */
@@ -88,12 +88,12 @@ __code uint8_t cfg_desc[] = {
 };
 
 __code uint8_t lang_desc[] = {0x04, 0x03, 0x09, 0x04};
-__code uint8_t manu_desc[] = {0x0A, 0x03, 'w', 0, 'c', 0, 'h', 0, '5', 0, '5', 0};
+__code uint8_t manu_desc[] = {0x0C, 0x03, 'w', 0, 'c', 0, 'h', 0, '5', 0, '5', 0};
 __code uint8_t prod_desc[] = {
     0x14, 0x03,
     'c', 0, 'h', 0, '5', 0, '5', 0, '2', 0, '-', 0, 's', 0, 'p', 0, 'i', 0
 };
-__code uint8_t seri_desc[] = {0x0E, 0x03, '0', 0, '0', 0, '0', 0, '1', 0};
+__code uint8_t seri_desc[] = {0x0A, 0x03, '0', 0, '0', 0, '0', 0, '1', 0};
 
 /*---------------------------------------------------------------*
  * State                                                        *
@@ -286,6 +286,34 @@ static __code const uint8_t *ep0_rom_src;
 
 #define UsbSetupBuf ((struct _USB_SETUP_REQ __xdata *)ep0_buf)
 
+/* Vendor status request (bRequest = 0x42, bmRequestType = 0xC0).
+ *
+ * It travels over EP0, so it still works when the bulk endpoints are not
+ * answering - which is exactly the case when the chip is running an older
+ * or incompatible build.  Host tools use it to confirm the firmware
+ * version before blaming the wiring. */
+static void ep0_fill_status(void)
+{
+    ep0_buf[0] = 'C';
+    ep0_buf[1] = 'S';
+    ep0_buf[2] = 'P';
+    ep0_buf[3] = PROTO_VERSION;
+    ep0_buf[4] = 1; /* firmware major, keep in sync with protocol.c */
+    ep0_buf[5] = 0; /* firmware minor */
+    ep0_buf[6] = UEP2_3_MOD;
+    ep0_buf[7] = UEP2_CTRL;
+    ep0_buf[8] = UEP3_CTRL;
+    ep0_buf[9] = UEP3_DMA_L;
+    ep0_buf[10] = ep3_frame_ready;
+    ep0_buf[11] = rx_half;
+    ep0_buf[12] = (uint8_t)((in_half & 0x01) |
+                            ((in_armed & 0x01) << 1) |
+                            ((in_pre_len ? 1 : 0) << 2));
+    ep0_buf[13] = USB_CTRL;
+    ep0_buf[14] = UDEV_CTRL;
+    ep0_buf[15] = 0;
+}
+
 static void ep0_setup(void)
 {
     uint8_t len, req;
@@ -303,6 +331,21 @@ static void ep0_setup(void)
     ep0_rem = UsbSetupBuf->wLengthH ? 0xFF : UsbSetupBuf->wLengthL;
     req = UsbSetupBuf->bRequest;
     len = 0;
+
+    if ((UsbSetupBuf->bRequestType & USB_REQ_TYP_MASK) == USB_REQ_TYP_VENDOR) {
+        if (req != VENDOR_REQ_STATUS) {
+            goto stall;
+        }
+        ep0_fill_status();
+        len = VENDOR_STATUS_LEN;
+        if (ep0_rem < len) {
+            ep0_rem = len;
+        }
+        len = ep0_rem >= EP0_SIZE ? EP0_SIZE : ep0_rem;
+        UEP0_T_LEN = len;
+        UEP0_CTRL = bUEP_R_TOG | bUEP_T_TOG | UEP_R_RES_ACK | UEP_T_RES_ACK;
+        return;
+    }
 
     if ((UsbSetupBuf->bRequestType & USB_REQ_TYP_MASK) != USB_REQ_TYP_STANDARD) {
         goto stall;
