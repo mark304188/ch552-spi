@@ -1,0 +1,23 @@
+# Build output
+build/
+*.rel
+*.ihx
+*.hex
+*.bin
+*.asm
+*.lst
+*.sym
+*.mem
+*.map
+*.rst
+*.adb
+*.lk
+
+# Local toolchain (optional, fetched by hand)
+toolchain/
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
