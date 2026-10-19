@@ -56,6 +56,7 @@ NAND_SET_FEATURE = 0x1F
 
 FEATURE_STATUS = 0xC0
 FEATURE_CFG = 0xB0
+FEATURE_LOCK = 0xA0
 
 ST_OIP = 0x01
 ST_FAIL = 0x0C  # E_FAIL | P_FAIL
@@ -82,13 +83,17 @@ def nand_reset(br):
 
 
 def nand_read_id(br):
+    """READ ID。DS35 在命令后先输出 1 个 dummy 字节，再输出 E5 21；
+    直接在返回数据里找厂商 ID，避免依赖固定的偏移。"""
     br.cs(0)
     try:
-        rx = br.xfer([NAND_READ_ID, 0xFF, 0xFF, 0xFF, 0xFF])
+        rx = br.xfer([NAND_READ_ID] + [0xFF] * 7)
     finally:
         br.cs(1)
-    # 第 1 个字节是发 0x9F 期间移入的无效数据
-    return rx[1:]
+    for i in range(1, len(rx) - 1):
+        if rx[i] == 0xE5:
+            return bytes((rx[i], rx[i + 1]))
+    return bytes(rx[1:3])
 
 
 def nand_get_feature(br, reg):
@@ -118,8 +123,9 @@ def nand_page_read(br, row):
 
 
 def nand_read_cache(br, column, count):
+    """READ FROM CACHE：命令 + 2 字节列地址 + **1 个 dummy 字节** + 数据。"""
     col = bytes(((column >> 8) & 0xFF, column & 0xFF))
-    return stream_read(br, bytes([NAND_READ_CACHE]) + col, count)
+    return stream_read(br, bytes([NAND_READ_CACHE]) + col + b"\xFF", count)
 
 
 def nand_is_bad_block(br, block):
@@ -289,6 +295,21 @@ def main():
           % (cfg, (cfg >> 4) & 1))
     if cfg & 0x10:
         print("警告     : ECC 未能关闭，测速结果会包含 ECC 开销")
+
+    # ---------------------------------------------------------- 块保护
+    lock = nand_get_feature(br, FEATURE_LOCK)
+    if lock & 0x3E:  # BP2:0 + INV + CMP
+        print("块保护   : A0h=0x%02X（BP2:0=%d%d%d）-> 清除"
+              % (lock, (lock >> 5) & 1, (lock >> 4) & 1, (lock >> 3) & 1))
+        nand_set_feature(br, FEATURE_LOCK, 0x00)
+        lock = nand_get_feature(br, FEATURE_LOCK)
+        if lock & 0x3E:
+            print("警告     : 块保护清除失败 (A0h=0x%02X)，检查 BRWD/WP#"
+                  % lock)
+        else:
+            print("           已解锁，全片可写")
+    else:
+        print("块保护   : A0h=0x%02X（未锁定）" % lock)
 
     # ---------------------------------------------------------- 几何
     br.send(CMD_NAND_SET_CFG, le16(PAGE_SIZE) + le16(OOB_SIZE) + bytes([0]))

@@ -502,16 +502,16 @@ static uint8_t nand_read_pages(void)
         }
 
         CS_ASSERT();
+        /* READ FROM CACHE: opcode + 2 byte column + 1 dummy byte.  The
+         * first byte clocked after the column is 00h; data follows. */
         if (nand_flags & 0x01) {
             spi_put(0x0B);
-            spi_put(0x00);
-            spi_put(0x00);
-            spi_put(0xFF); /* dummy */
         } else {
             spi_put(0x03);
-            spi_put(0x00);
-            spi_put(0x00);
         }
+        spi_put(0x00);
+        spi_put(0x00);
+        spi_put(0xFF); /* dummy */
         st = stream_read((uint16_t)(nand_page_size + nand_oob_size));
         CS_DEASSERT();
         if (st != ST_OK) {

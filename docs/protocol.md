@@ -477,6 +477,15 @@ payload : [page0][page1][page2][npages_lo][npages_hi]
 OIP → `READ FROM CACHE(03/0B)` 从列地址 0 读出整页（主区 + OOB）。
 遇到 E_FAIL/P_FAIL 立即停止。
 
+> **dummy 字节**：DS35M1GA 的 `READ FROM CACHE` 是「命令 + 2 字节列地址 +
+> **1 个 dummy 字节** + 数据」，`READ ID(9F)` 是「命令 + **1 dummy** + ID」；
+> 这些由固件/主机按器件处理，协议层不感知。
+> `PROGRAM LOAD(02)` 则是「命令 + 2 字节列地址 + 数据」，没有 dummy。
+
+> **块保护**：DS35M1GA 上电后 `A0h`（Block Lock）= `0x38`，即 BP2:0=111
+> 全片锁定，此时擦除/编程会立即返回 E_FAIL/P_FAIL。主机必须先
+> `SET FEATURE A0h = 0x00` 解锁（该寄存器非易失，复位后仍可能保持锁定）。
+
 #### `CMD_NAND_PROGRAM_PAGES` (0x27)
 
 ```
