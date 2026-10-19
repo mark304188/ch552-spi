@@ -183,12 +183,22 @@ python3 host/speedtest.py --engine fw -y   # 固件内循环（NOR 加速命令�
 针对 DS35M1GA（1.8V）/ DS35Q1GA（3.3V），1 Gbit，页 2048+64，块 64 页。
 默认**关闭片上 ECC**（`Set Features B0h = 0x00`），测的是纯 SPI/USB 路径。
 
+ECC 模式（`--ecc`）：
+
+| 值 | 说明 |
+|---|---|
+| `none`（默认） | 关片上 ECC，OOB 全 `0xFF`，只测裸读写 |
+| `ondie` | 打开片上 ECC（`B0h=0x10`），写完读回后抽样检查 `SR[5:4]` |
+| `host` | 关片上 ECC，主机按 512 B 一段算 **BCH-4**（7 字节校验）写进 OOB[8..35]，读回后逐段校验 |
+
 ```bash
 python3 host/nand_speedtest.py --id-only   # 只读 ID / 状态 / 配置寄存器
 python3 host/nand_speedtest.py -y          # 4 个块（512 KiB 主区）读写测速
 python3 host/nand_speedtest.py --blocks 16 --div 2 -y
 python3 host/nand_speedtest.py --engine host -y   # 主机逐页驱动（对比用）
 python3 host/nand_speedtest.py --no-erase -y      # 块已擦除时直接写
+python3 host/nand_speedtest.py --ecc ondie --div 2 -y   # 片上 ECC
+python3 host/nand_speedtest.py --ecc host  --div 2 -y   # 主机 BCH-4
 ```
 
 流程：复位 → `9Fh` 读 ID → 关 ECC → 找连续好块 → `D8h` 擦除 →
@@ -205,6 +215,10 @@ python3 host/nand_speedtest.py --no-erase -y      # 块已擦除时直接写
 - **坏块**：按手册用块内第 1/2 页 OOB 第 1 字节判断，自动跳过并寻找
   连续好块。
 - 行地址 = `block * 64 + page`（RA[15:6]=块，RA[5:0]=页）。
+- **主机 ECC**：`host/bch.py` 是 512 B / 4-bit BCH 参考实现（GF(2^14)，
+  7 字节校验），编码约 3 MiB/s，不会成为瓶颈。片上 ECC 的码型是芯片内部
+  的、校验位在隐藏 spare 区，两者不兼容；`--ecc host` 只是用来测“主机关
+  ECC 时”的开销。当前只做编码和一致性校验，不实现纠错译码。
 - **块保护**：DS35M1GA 上电后 `A0h = 0x38`（BP2:0=111，全片锁定），
   擦除/编程会直接 E_FAIL。脚本每次运行都会检查并写 `A0h = 0x00` 解锁。
 - **dummy 字节**：`9Fh` 后 1 个 dummy 才是 ID；`03h` 列地址后 1 个 dummy

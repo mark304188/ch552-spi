@@ -25,6 +25,7 @@ import usb.core
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import bch  # noqa: E402
 from nor_id import BACKEND, Bridge, FSYS_MHZ, VID, PID  # noqa: E402
 from speedtest import (  # noqa: E402
     DATA_CHUNK, EP_IN, EP_OUT, ST_OK, TIMEOUT_MS, human, rate,
@@ -211,6 +212,43 @@ def page_pattern(row):
     return main + b"\xFF" * OOB_SIZE
 
 
+def page_pattern_ecc(row):
+    """主区数据 + 每个 512B 段 7 字节 BCH 校验（放在 OOB[8..35]）。
+
+    OOB[0] 留 0xFF，避免把坏块标记写坏。"""
+    main = page_pattern(row)[:PAGE_SIZE]
+    oob = bytearray(b"\xFF" * OOB_SIZE)
+    for i in range(PAGE_SIZE // 512):
+        oob[8 + i * 7:8 + (i + 1) * 7] = bch.encode(main[i * 512:(i + 1) * 512])
+    return main + bytes(oob)
+
+
+def verify_ecc_blocks(read_back, npages):
+    """逐页逐 512B 段检查 BCH 余式，返回失败段数。"""
+    bad = 0
+    for p in range(npages):
+        base = p * PAGE_TOTAL
+        for i in range(PAGE_SIZE // 512):
+            sec = read_back[base + i * 512:base + (i + 1) * 512]
+            par = read_back[base + PAGE_SIZE + 8 + i * 7:
+                            base + PAGE_SIZE + 8 + (i + 1) * 7]
+            if not bch.check(sec, par):
+                bad += 1
+    return bad
+
+
+def sample_ecc_status(br, start_row, npages, count=4):
+    """抽样读几页，返回片上 ECC 状态 SR[5:4] 列表。"""
+    res = []
+    step = max(1, npages // count)
+    for k in range(count):
+        row = start_row + k * step
+        nand_page_read(br, row)
+        st = nand_get_feature(br, FEATURE_STATUS)
+        res.append((st >> 4) & 0x03)
+    return res
+
+
 def compare(written, read_back, main_only=True):
     first = -1
     bad = 0
@@ -243,6 +281,8 @@ def main():
     ap.add_argument("--mode", type=int, choices=(0, 3), default=0)
     ap.add_argument("--block", type=int, default=8, help="起始块")
     ap.add_argument("--blocks", type=int, default=4, help="测试块数")
+    ap.add_argument("--ecc", choices=("none", "ondie", "host"), default="none",
+                    help="none=关 ECC，ondie=片上 ECC，host=主机关 ECC 并算 BCH-4")
     ap.add_argument("--engine", choices=("fw", "host"), default="fw",
                     help="fw=固件加速命令，host=主机逐页驱动")
     ap.add_argument("--id-only", action="store_true", help="只探测 ID/状态")
@@ -288,13 +328,17 @@ def main():
     if args.id_only:
         return 0
 
-    # ---------------------------------------------------------- 关闭 ECC
-    nand_set_feature(br, FEATURE_CFG, 0x00)  # ECC off, QE off (x1)
+    # ---------------------------------------------------------- ECC 设置
+    if args.ecc == "ondie":
+        nand_set_feature(br, FEATURE_CFG, 0x10)  # ECC on, QE off
+    else:
+        nand_set_feature(br, FEATURE_CFG, 0x00)  # ECC off, QE off
     cfg = nand_get_feature(br, FEATURE_CFG)
-    print("ECC      : 关闭 (B0h=0x%02X, bit4=%d)"
-          % (cfg, (cfg >> 4) & 1))
-    if cfg & 0x10:
-        print("警告     : ECC 未能关闭，测速结果会包含 ECC 开销")
+    print("ECC      : %s (B0h=0x%02X, bit4=%d)"
+          % ("片上 ECC 开" if args.ecc == "ondie" else "关闭",
+             cfg, (cfg >> 4) & 1))
+    if (args.ecc == "ondie") != bool(cfg & 0x10):
+        print("警告     : ECC 设置与请求不一致")
 
     # ---------------------------------------------------------- 块保护
     lock = nand_get_feature(br, FEATURE_LOCK)
@@ -356,7 +400,13 @@ def main():
               % (len(good), t_erase, t_erase * 1000.0 / len(good)))
 
     # ---------------------------------------------------------- 写入
-    data = b"".join(page_pattern(start_row + i) for i in range(npages))
+    t_ecc_enc = 0.0
+    if args.ecc == "host":
+        t0 = time.perf_counter()
+        data = b"".join(page_pattern_ecc(start_row + i) for i in range(npages))
+        t_ecc_enc = time.perf_counter() - t0
+    else:
+        data = b"".join(page_pattern(start_row + i) for i in range(npages))
     t0 = time.perf_counter()
     if args.engine == "fw":
         nand_program_pages_fw(br, start_row, npages, data)
@@ -385,13 +435,36 @@ def main():
 
     # ---------------------------------------------------------- 校验
     first, bad = compare(data, back)
-    if bad == 0:
-        print("[4] 校验: 通过（主区 %s 全部匹配）" % human(main_bytes))
+    ecc_bad = 0
+    t_ecc_chk = 0.0
+    ecc_status = []
+    if args.ecc == "host":
+        t0 = time.perf_counter()
+        ecc_bad = verify_ecc_blocks(back, npages)
+        t_ecc_chk = time.perf_counter() - t0
+    elif args.ecc == "ondie":
+        ecc_status = sample_ecc_status(br, start_row, npages)
+
+    if bad == 0 and ecc_bad == 0:
+        print("[4] 校验: 通过（主区 %s 全部匹配%s）"
+              % (human(main_bytes),
+                 "，BCH 校验位全部一致" if args.ecc == "host" else ""))
     else:
-        print("[4] 校验: 失败，%d 字节不同，首个差异 +0x%X" % (bad, first))
-        off = max(0, first - 8)
-        print("      期望 %s" % data[off:off + 24].hex(" "))
-        print("      实际 %s" % back[off:off + 24].hex(" "))
+        print("[4] 校验: 失败，%d 字节不同，首个差异 +0x%X"
+              % (bad, first))
+        if ecc_bad:
+            print("      BCH 校验失败 %d 个 512B 段" % ecc_bad)
+        if bad:
+            off = max(0, first - 8)
+            print("      期望 %s" % data[off:off + 24].hex(" "))
+            print("      实际 %s" % back[off:off + 24].hex(" "))
+    if args.ecc == "ondie":
+        print("      片上 ECC 状态抽样: %s  (%s)"
+              % (" ".join("%02d" % x for x in ecc_status),
+                 "全部无错" if all(x == 0 for x in ecc_status) else "有纠正/错误"))
+    if args.ecc == "host":
+        print("      BCH 编码 %.3f s，校验 %.3f s（%d 段 × 512 B）"
+              % (t_ecc_enc, t_ecc_chk, npages * 4))
 
     # ---------------------------------------------------------- 汇总
     print()
@@ -399,16 +472,21 @@ def main():
     print("  芯片     : %s  %s" % (jid.hex(" ").upper(), name))
     print("  SPI      : %.1f MHz (div=%d, mode %d)"
           % (FSYS_MHZ / args.div, args.div, args.mode))
-    print("  几何     : %d + %d B/页, %d 页/块, ECC 关闭"
-          % (PAGE_SIZE, OOB_SIZE, PAGES_PER_BLOCK))
+    print("  几何     : %d + %d B/页, %d 页/块, ECC %s"
+          % (PAGE_SIZE, OOB_SIZE, PAGES_PER_BLOCK,
+             {"none": "关闭", "ondie": "片上", "host": "主机 BCH-4"}[args.ecc]))
     if t_erase:
         print("  擦除     : %.2f ms/块  (%.1f KiB/s)"
               % (t_erase * 1000.0 / len(good),
                  (len(good) * 128.0 * 1024) / t_erase / 1024.0))
     print("  写入     : %s" % rate(main_bytes, t_prog))
     print("  读取     : %s" % rate(main_bytes, t_read))
-    print("  校验     : %s" % ("通过" if bad == 0 else "失败"))
-    return 0 if bad == 0 else 1
+    print("  校验     : %s" % ("通过" if bad == 0 and ecc_bad == 0 else "失败"))
+    if args.ecc == "host":
+        print("  ECC 开销 : 编码 %s, 校验 %s"
+              % (rate(main_bytes, t_ecc_enc) if t_ecc_enc else "-",
+                 rate(main_bytes, t_ecc_chk) if t_ecc_chk else "-"))
+    return 0 if bad == 0 and ecc_bad == 0 else 1
 
 
 if __name__ == "__main__":
