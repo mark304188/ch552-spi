@@ -124,9 +124,10 @@
 #define MAX_PREFIX 8
 
 /* GPIO pin indices used by CMD_GPIO_*.  The index maps to a physical pin
- * through the BOARD_GPIO*_BIT table in board.h; by convention index 0 is
- * the target /RESET line.  Auxiliary pins are driven open drain, so
- * value 0 pulls low and value 1 releases the line. */
+ * through the BOARD_GPIO*_BIT table in board.h.  Auxiliary pins are driven
+ * open drain, so value 0 pulls low and value 1 releases the line (an
+ * external pull-up then brings it high).  Index 0 is wired by the board;
+ * it is typically the flash /WP pin (write protect) or a target reset. */
 #define PIN_RESET 0
 
 /*---------------------------------------------------------------*

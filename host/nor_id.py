@@ -193,6 +193,8 @@ def report(jdec):
         print("诊断: 读回全 0xFF，MOSI/MISO 上没有器件回应。可能原因：")
         print("  - Flash 未供电，或 CS/SCK/MOSI/MISO 接线错误")
         print("  - CS 没有真正拉低（检查 P1.4 与 Flash 的 CS#）")
+        print("  - /HOLD (pin 7) 被拉低或悬空：必须用 10k 上拉到 3.3V，")
+        print("    否则芯片完全不响应（这是读回全 FF 最常见的原因）")
         print("  - SPI 时钟太快（试 --div 8 或 16）")
         return False
 
@@ -201,13 +203,15 @@ def report(jdec):
         print()
         print("诊断: 读回全 0x00，MISO 被拉低。可能原因：")
         print("  - MISO 与 GND 短路，或 Flash 未上电")
-        print("  - 上一颗芯片的保持状态（尝试给 Flash 复位）")
+        print("  - 芯片处于 /HOLD 或掉电状态（检查 pin 7 的上拉和 VCC）")
         return False
 
     name = MANUFACTURERS.get(man)
     print("厂商     : %s (0x%02X)" % (name or "未知", man))
     print("类型     : 0x%02X" % typ)
     print("容量     : 0x%02X -> %s" % (cap, describe_size(cap)))
+    if typ == 0x00:
+        print("提示     : type 为 0x00 较罕见，确认没有接错/虚焊")
     if ext is not None:
         print("扩展字节 : 0x%02X（厂商自定义，部分型号为设备 ID）" % ext)
     return True

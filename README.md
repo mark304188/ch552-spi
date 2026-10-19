@@ -107,7 +107,7 @@ WCH bootloader。
 | P1.6  | 输入 | SO / IO1  | SPI0 MISO |
 | P1.5  | 输出 | SI / IO0  | SPI0 MOSI |
 | P1.4  | 输出 | CS#       | 软件片选，可在 `board.h` 改 |
-| P1.3  | 开漏 | RST#      | 可选，`CMD_GPIO_WRITE` 控制，可在 `board.h` 改 |
+| P1.3  | 开漏 | 可选      | 默认不接；需要软件控制写保护时接 `/WP`，`board.h` 可改 |
 | 3V3   | 电源 | VCC       | CH552 内部 LDO 输出能力有限，建议外部 3.3 V |
 | GND   | —    | GND       | |
 

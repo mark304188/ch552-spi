@@ -28,7 +28,7 @@ GND ───────┴── GND
 > SPI NOR/NAND 时目标芯片的峰值电流一般不大，但如果目标是多颗并联或者
 > 需要 1.8 V，请用外部电源方案。
 
-## 1.1 主频与供电电压的对应关系（重要）
+### 1.1 主频与供电电压的对应关系（重要）
 
 CH552 数据手册表 8.2.2 对主频有供电电压限制：
 
@@ -74,9 +74,9 @@ make FREQ_SYS=12000000
  * 可以改成任意空闲的 P1.0 ~ P1.4。 */
 #define BOARD_CS_BIT 4
 
-/* 辅助 GPIO：索引 0 是目标复位脚，可改成 P1.0 ~ P1.4 或 P3.x 之外的
- * 空闲 P1 脚；0xFF 表示不使用该槽位。 */
-#define BOARD_GPIO0_BIT 3      /* P1.3 -> 目标 /RESET */
+/* 辅助 GPIO：索引 0 默认 P1.3，可改成任意空闲 P1 脚；
+ * 0xFF 表示不使用该槽位。默认不接，需要时接 /WP 或 /RESET。 */
+#define BOARD_GPIO0_BIT 3      /* P1.3 */
 #define BOARD_GPIO1_BIT 0xFF
 #define BOARD_GPIO2_BIT 0xFF
 #define BOARD_GPIO3_BIT 0xFF
@@ -119,51 +119,97 @@ MISO 不要加上拉：Flash 在未被选中时会把 SO 置为高阻，上拉�
 
 | 引脚 | 用途 | 控制方式 |
 |---|---|---|
-| P1.3 | 目标 RST#（开漏） | `CMD_GPIO_WRITE`，pin = 0 |
+| P1.3 | 辅助 GPIO（开漏），默认不接；可接 `/WP` 或 `/RESET` | `CMD_GPIO_WRITE`，pin = 0 |
 | P3.0/P3.1 | UART0 调试口（仅 `DE_PRINTF=1` 时编译） | 115200 8N1 |
-| P3.2/P3.3 | 未使用 | 可自行在 board.h 里改成辅助 GPIO |
+| P3.2/P3.3 | 未使用 | 可自行在 `board.h` 里改成辅助 GPIO |
 
-`P1.3` 默认是输入（高阻），不会影响目标板；需要复位目标时由上位机
-显式拉低。
+`P1.3` 上电后是高阻（开漏释放），不会影响目标板；需要动作时由上位机
+显式拉低。它**不是必须接**的：标准 SOIC-8 的 NOR/NAND 没有复位脚，
+`/WP` 和 `/HOLD` 用两个上拉电阻处理即可（见下一节）。
 
 > 如果要接 NAND 的 R/B#：最简单的做法是用 `0F C0` 读 feature 寄存器判断
 > OIP，不需要额外接线。确实需要硬件握手时，把 `BOARD_GPIO1_BIT` 改成
 > `P3.2`/`P3.3` 即可——但 `board.c` 目前按开漏输出配置辅助引脚，做输入
 > 需要把对应槽位改成高阻输入（`gpio_drive` 里一行改动）。
 
-## 4. 接线示例（SPI NOR，SOP8/SOIC8）
+## 4. 接线示例（SPI NOR，SOIC-8）
+
+标准 25 系列 SPI NOR 的 8 脚封装：
+
+| 脚 | 名称 | 说明 |
+|---|---|---|
+| 1 | /CS | 片选 |
+| 2 | DO (IO1) | 数据输出 |
+| 3 | **/WP (IO2)** | 写保护，低有效 |
+| 4 | GND | 地 |
+| 5 | DI (IO0) | 数据输入 |
+| 6 | CLK | 时钟 |
+| 7 | **/HOLD (IO3)** | 保持，低有效 |
+| 8 | VCC | 电源 |
 
 ```
-CH552            W25Qxx / GD25Qxx
-P1.7  SCK    ─── 6  SCK
-P1.6  MISO   ─── 2  SO (IO1)
-P1.5  MOSI   ─── 5  SI (IO0)
+CH552            W25Qxx / GD25Qxx (SOIC-8)
+P1.7  SCK    ─── 6  CLK
+P1.6  MISO   ─── 2  DO (IO1)
+P1.5  MOSI   ─── 5  DI (IO0)
 P1.4  CS#    ─── 1  CS#
-P1.3  RST#   ─── 3  RESET#   (可选，多数板子直接上拉)
 3V3          ─── 8  VCC
 GND          ─── 4  GND
-                 7  WP#  ── 10k ── 3V3
-                 3  HOLD# ─ 10k ── 3V3
+
+                 3  /WP   (IO2) ── 10k ── 3V3
+                 7  /HOLD (IO3) ── 10k ── 3V3
 ```
 
-`WP#` 和 `HOLD#` 必须上拉到 3.3 V，否则芯片会进入写保护或保持状态。
+`/WP` 和 `/HOLD` **不接 MCU，但必须各用一个 10 kΩ 上拉到 3.3 V**：
 
-## 5. 接线示例（SPI NAND，WSON8/TSOP48）
+* `/WP` 为低时芯片忽略所有 program/erase 命令（读和读 ID 不受影响），
+  典型症状是"能认 ID，写不进去"。
+* `/HOLD` 为低时芯片连时钟都不响应，典型症状是**读 ID 返回全 `FF`**。
+* 不要靠芯片内部上拉：通常只有几十 µA 的弱上拉，长线或干扰下不可靠，
+  各家 datasheet 的典型应用电路都要求外部 10 kΩ。
+
+> 少数型号（例如 W25Q32FW 的 IM 订购选项）把 pin 3 复用为 `/RESET`
+> 而不是 `/WP`，此时 pin 3 同样只需要 10 kΩ 上拉。
+
+### 4.1 需要软件控制写保护时
+
+把 `/WP` 改接到 P1.3（辅助 GPIO 0），保留那个 10 kΩ 上拉：
 
 ```
-CH552            SPI NAND
+P1.3  ─── 3  /WP (IO2) ── 10k ── 3V3
+```
+
+辅助 GPIO 是开漏驱动，"释放"为高阻，由上拉拉高：
+
+| 操作 | 效果 |
+|---|---|
+| `CMD_GPIO_WRITE pin=0 value=0` | 拉低 `/WP` → 写保护 |
+| `CMD_GPIO_WRITE pin=0 value=1` | 释放 → 上拉拉高 → 可写 |
+
+固件默认上电即释放，所以不操作时芯片处于可写状态。如果希望开机就是
+保护状态，把 `board.c` 的 `board_init()` 里该引脚改成 `board_gpio_write(0, 0)`。
+
+## 5. 接线示例（SPI NAND，WSON8）
+
+```
+CH552            SPI NAND (WSON8)
 P1.7  SCK    ─── CLK
-P1.6  MISO   ─── SO / IO1
-P1.5  MOSI   ─── SI / IO0
+P1.6  MISO   ─── DO (IO1)
+P1.5  MOSI   ─── DI (IO0)
 P1.4  CS#    ─── CS#
 3V3          ─── VCC
 GND          ─── GND
-                 WP#  ── 10k ── 3V3
-                 HOLD#/IO2, IO3  ── 10k ── 3V3（或悬空）
+
+                 3  /WP   (IO2) ── 10k ── 3V3
+                 7  /HOLD (IO3) ── 10k ── 3V3
 ```
 
-NAND 的 `R/B#` 可以悬空，用 `GET FEATURE (0F C0)` 轮询 OIP 位即可。
-部分老型号没有 OIP 位，需要读 `0F C0` 的状态字节或使用 R/B# 引脚。
+规则和 NOR 完全一样。NAND 的 `R/B#` 只有在 TSOP48 之类的大封装上才有，
+WSON8 没有这个脚；等待内部操作完成用 `GET FEATURE (0F C0)` 轮询 OIP
+即可，不需要额外接线。
+
+> 老型号如果没有 OIP 位，可以读 `0F C0` 状态字节的 bit0，或者换用带
+> R/B# 的封装并把该脚接到 P3.2/P3.3（见第 3 节）。
 
 ## 6. 供电与信号完整性
 

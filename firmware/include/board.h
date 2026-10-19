@@ -49,7 +49,12 @@ SBIT(board_cs, 0x90, BOARD_CS_BIT);
  * BOARD_GPIO0_BIT.  Use 0xFF for an unused slot.                *
  *---------------------------------------------------------------*/
 
-#define BOARD_GPIO0_BIT 3    /* P1.3: target /RESET */
+/* Index 0 is left unconnected by default.  Wire it to the flash /WP pin
+ * if the host should be able to switch write protection on and off; the
+ * pin is open drain, so "released" relies on the 10k pull-up that /WP
+ * needs anyway.  Wire it to a target /RESET line instead if the board has
+ * one. */
+#define BOARD_GPIO0_BIT 3    /* P1.3 */
 #define BOARD_GPIO1_BIT 0xFF /* unused */
 #define BOARD_GPIO2_BIT 0xFF /* unused */
 #define BOARD_GPIO3_BIT 0xFF /* unused */
