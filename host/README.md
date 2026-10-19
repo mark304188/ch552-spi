@@ -216,7 +216,9 @@ python3 host/nand_speedtest.py --ecc host  --div 2 -y   # 主机 BCH-4
   连续好块。
 - 行地址 = `block * 64 + page`（RA[15:6]=块，RA[5:0]=页）。
 - **主机 ECC**：`host/bch.py` 是 512 B / 4-bit BCH 参考实现（GF(2^14)，
-  7 字节校验），编码约 3 MiB/s，不会成为瓶颈。片上 ECC 的码型是芯片内部
+  7 字节校验），编码约 3 MiB/s，是桥吞吐（~0.43 MiB/s）的 7 倍，
+  不会成为瓶颈。实测片上 ECC 和主机 BCH-4 都仍是 ~430 KiB/s，
+  说明在这个桥上 ECC 完全不构成瓶颈，USB 才是。片上 ECC 的码型是芯片内部
   的、校验位在隐藏 spare 区，两者不兼容；`--ecc host` 只是用来测“主机关
   ECC 时”的开销。当前只做编码和一致性校验，不实现纠错译码。
 - **块保护**：DS35M1GA 上电后 `A0h = 0x38`（BP2:0=111，全片锁定），

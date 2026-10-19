@@ -236,6 +236,8 @@ print("id", r[2:5].hex())                  # r[1] 是发送 0x9F 时的无效字
   | 主机逐页（`CMD_STREAM_*`） | 42 KiB/s | 55 KiB/s |
   | 固件内循环 6 MHz | 195 KiB/s | 263 KiB/s |
   | 固件内循环 12 MHz | **434 KiB/s** | **438 KiB/s** |
+  | 同上 + 片上 ECC | ~430 KiB/s | ~430 KiB/s |
+  | 同上 + 主机 BCH-4 | ~430 KiB/s | ~430 KiB/s |
 
 * NOR/NAND 的擦除、编程时间由芯片本身决定，固件只负责不引入额外等待。
 
