@@ -42,6 +42,8 @@ TIMEOUT_MS = 5000
 
 CMD_STREAM_WRITE = 0x20
 CMD_STREAM_READ = 0x21
+CMD_NOR_PROGRAM = 0x23
+CMD_NOR_ERASE = 0x24
 
 MAX_PACKET = 64
 # 数据阶段一次提交给 libusb 的字节数。设备按 64 字节逐包处理，但一个大的
@@ -125,6 +127,17 @@ def make_pattern(addr, size, kind, seed=0x5A):
 
 # ------------------------------------------------------------------ 流式命令
 
+def recv_exact(br, n, timeout):
+    """读满 n 字节（加速命令的回包可能在设备里等几百毫秒到几秒）。"""
+    buf = bytearray()
+    while len(buf) < n:
+        part = br.dev.read(EP_IN, n - len(buf), timeout)
+        if not part:
+            break
+        buf += part
+    return bytes(buf)
+
+
 def _check_status(st, what):
     if st != ST_OK:
         raise RuntimeError("%s 失败 (status=0x%02X)" % (what, st))
@@ -159,6 +172,40 @@ def stream_read(br, prefix, count, chunk=DATA_CHUNK):
     if len(buf) != count:
         raise RuntimeError("读取长度不符（期望 %d，收到 %d）" % (count, len(buf)))
     return bytes(buf)
+
+
+# ------------------------------------------------------------------ 固件加速命令
+
+def nor_erase_fw(br, addr, size):
+    """CMD_NOR_ERASE：设备内部逐扇区 WREN + 0x20 + 等 WIP。"""
+    timeout = 5000 + (size // SECTOR) * 1000
+    br.send(CMD_NOR_ERASE, u24(addr) + u24(size))
+    r = recv_exact(br, 4, timeout)
+    if len(r) != 4:
+        raise RuntimeError("擦除回包长度不符（收到 %d 字节）" % len(r))
+    done = r[1] | (r[2] << 8) | (r[3] << 16)
+    if r[0] != ST_OK:
+        raise RuntimeError("擦除失败 status=0x%02X，已完成 %d 个扇区"
+                           % (r[0], done))
+    return done
+
+
+def nor_program_fw(br, addr, data, chunk=DATA_CHUNK):
+    """CMD_NOR_PROGRAM：设备内部按页 WREN + PP + 等 WIP。"""
+    timeout = 5000 + (len(data) // PAGE) * 10
+    br.send(CMD_NOR_PROGRAM, u24(addr) + u24(len(data)))
+    for off in range(0, len(data), chunk):
+        br.dev.write(EP_OUT, data[off:off + chunk], TIMEOUT_MS)
+    r = recv_exact(br, 4, timeout)
+    if len(r) != 4:
+        raise RuntimeError("编程回包长度不符（收到 %d 字节）" % len(r))
+    done = r[1] | (r[2] << 8) | (r[3] << 16)
+    if r[0] != ST_OK:
+        raise RuntimeError("编程失败 status=0x%02X，已完成 %d 字节"
+                           % (r[0], done))
+    if done != len(data):
+        raise RuntimeError("编程完成字节数不符（%d/%d）" % (done, len(data)))
+    return done
 
 
 # ------------------------------------------------------------------ NOR 操作
@@ -284,6 +331,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0x5A, help="random 模式种子")
     ap.add_argument("--chunk", type=int, default=DATA_CHUNK,
                     help="数据阶段每 URB 字节数")
+    ap.add_argument("--engine", choices=("host", "fw"), default="host",
+                    help="host=主机逐页驱动，fw=固件内循环（CMD_NOR_PROGRAM/ERASE）")
     ap.add_argument("--no-erase", action="store_true",
                     help="跳过擦除（仅当目标区域已擦除）")
     ap.add_argument("--no-write", action="store_true",
@@ -369,13 +418,16 @@ def main():
     # ---------------------------------------------------------- 擦除
     t_erase = t_erase_busy = 0.0
     if not args.no_write and not args.no_erase:
-        print("[1] 擦除 %d 个 4 KiB 扇区 ..." % sectors)
+        print("[1] 擦除 %d 个 4 KiB 扇区 (%s) ..." % (sectors, args.engine))
         t0 = time.perf_counter()
-        for i in range(sectors):
-            _total, busy = erase_sector(br, addr + i * SECTOR)
-            t_erase_busy += busy
-            if sectors >= 8 and (i + 1) % max(1, sectors // 8) == 0:
-                print("\r    扇区 %d/%d" % (i + 1, sectors), end="", flush=True)
+        if args.engine == "fw":
+            nor_erase_fw(br, addr, size)
+        else:
+            for i in range(sectors):
+                _total, busy = erase_sector(br, addr + i * SECTOR)
+                t_erase_busy += busy
+                if sectors >= 8 and (i + 1) % max(1, sectors // 8) == 0:
+                    print("\r    扇区 %d/%d" % (i + 1, sectors), end="", flush=True)
         t_erase = time.perf_counter() - t0
         print("\r    完成，用时 %.3f s%s" % (t_erase, " " * 12))
         print("    平均 %.1f ms/扇区, %s"
@@ -390,21 +442,29 @@ def main():
         print("[2] 编程 %d 页 x %d B (%s 模式) ..."
               % (pages, PAGE, args.pattern))
         t0 = time.perf_counter()
-        for i in range(pages):
-            off = i * PAGE
-            send, busy = program_page(br, addr + off, data[off:off + PAGE])
-            t_send += send
-            t_busy += busy
-            if pages >= 16 and (i + 1) % max(1, pages // 8) == 0:
-                print("\r    页 %d/%d" % (i + 1, pages), end="", flush=True)
+        if args.engine == "fw":
+            nor_program_fw(br, addr, data)
+        else:
+            for i in range(pages):
+                off = i * PAGE
+                send, busy = program_page(br, addr + off, data[off:off + PAGE])
+                t_send += send
+                t_busy += busy
+                if pages >= 16 and (i + 1) % max(1, pages // 8) == 0:
+                    print("\r    页 %d/%d" % (i + 1, pages), end="", flush=True)
         t_total = time.perf_counter() - t0
         print("\r    完成%s" % (" " * 16))
-        print("    发送/SPI : %.3f s  (%s)  <- 桥 + USB 的写入开销"
-              % (t_send, rate(size, t_send)))
-        print("    等待 tPP : %.3f s  (平均 %.2f ms/页)"
-              % (t_busy, t_busy * 1000.0 / pages))
-        print("    合计     : %.3f s  (%s, 平均 %.2f ms/页)"
-              % (t_total, rate(size, t_total), t_total * 1000.0 / pages))
+        if args.engine == "fw":
+            t_send = t_total
+            print("    合计     : %.3f s  (%s, 平均 %.2f ms/页, 含 Flash tPP)"
+                  % (t_total, rate(size, t_total), t_total * 1000.0 / pages))
+        else:
+            print("    发送/SPI : %.3f s  (%s)  <- 桥 + USB 的写入开销"
+                  % (t_send, rate(size, t_send)))
+            print("    等待 tPP : %.3f s  (平均 %.2f ms/页)"
+                  % (t_busy, t_busy * 1000.0 / pages))
+            print("    合计     : %.3f s  (%s, 平均 %.2f ms/页)"
+                  % (t_total, rate(size, t_total), t_total * 1000.0 / pages))
         print()
 
     # ---------------------------------------------------------- 读回
@@ -443,10 +503,14 @@ def main():
         print("  擦除     : %s  (%.1f ms/扇区)"
               % (rate(size, t_erase), t_erase * 1000.0 / sectors))
     if t_send:
-        print("  写入(桥) : %s  (%.2f ms/页, 不含 Flash tPP)"
-              % (rate(size, t_send), t_send * 1000.0 / pages))
-        print("  写入(实测) : %s  (含 Flash tPP)"
-              % rate(size, t_send + t_busy))
+        if args.engine == "fw":
+            print("  写入(实测) : %s  (固件内循环，含 Flash tPP)"
+                  % rate(size, t_send + t_busy))
+        else:
+            print("  写入(桥) : %s  (%.2f ms/页, 不含 Flash tPP)"
+                  % (rate(size, t_send), t_send * 1000.0 / pages))
+            print("  写入(实测) : %s  (含 Flash tPP)"
+                  % rate(size, t_send + t_busy))
     if t_read:
         print("  读取     : %s" % rate(size, t_read))
     if verified:

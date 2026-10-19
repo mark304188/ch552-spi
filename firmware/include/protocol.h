@@ -88,6 +88,31 @@
 #define CMD_STREAM_READ 0x21
 #define CMD_STREAM_XFER 0x22
 
+/* Flash accelerators: the device runs the per-page loop itself, so the
+ * host streams a whole block with one command instead of 3..5 USB round
+ * trips per page.  All of them drive CS themselves and must not be mixed
+ * with CMD_CS (they reply ST_BUSY if CS is held).
+ *
+ *   CMD_NOR_PROGRAM      [addr24][len24] + data
+ *                        -> [status][done24]   bytes programmed
+ *   CMD_NOR_ERASE        [addr24][len24]       4 KiB aligned
+ *                        -> [status][done24]   sectors erased
+ *   CMD_NAND_SET_CFG     [page16][oob16][flags] -> 1 byte
+ *                        flags bit0: READ FROM CACHE uses 0x0B (1 dummy)
+ *   CMD_NAND_READ_PAGES  [page24][npages16]
+ *                        -> npages*(page+oob) bytes + 1 byte status
+ *   CMD_NAND_PROGRAM_PAGES [page24][npages16] + data
+ *                        -> [status][done24]   pages programmed
+ *
+ * The NAND commands transfer the OOB area verbatim, so both on-die ECC
+ * and host-computed ECC work: enable on-die ECC with SET FEATURE
+ * (0x1F, 0xB0) through CMD_STREAM_WRITE, or fill the OOB yourself. */
+#define CMD_NOR_PROGRAM 0x23
+#define CMD_NOR_ERASE 0x24
+#define CMD_NAND_SET_CFG 0x25
+#define CMD_NAND_READ_PAGES 0x26
+#define CMD_NAND_PROGRAM_PAGES 0x27
+
 /* Board control. */
 #define CMD_GPIO_WRITE 0x30 /* payload [pin][value]  (no reply)    */
 #define CMD_GPIO_READ 0x31  /* payload [pin] -> 2 bytes            */
@@ -111,9 +136,16 @@
 #define CAP_XFER 0x0008        /* CMD_SPI_XFER / CMD_SPI_READ     */
 #define CAP_SPI_CFG 0x0010     /* runtime divider / mode changes  */
 #define CAP_GPIO 0x0020        /* CMD_GPIO_*                      */
+#define CAP_NOR_ACCEL 0x0040   /* CMD_NOR_PROGRAM / CMD_NOR_ERASE */
+#define CAP_NAND_ACCEL 0x0080  /* CMD_NAND_READ / PROGRAM_PAGES   */
+#define CAP_ERASE_ACCEL 0x0100 /* CMD_NOR_ERASE                   */
 
 /* Protocol version.  Bumped whenever the frame layout changes. */
 #define PROTO_VERSION 0x01
+
+/* Firmware version, reported by CMD_GET_INFO and the EP0 status query. */
+#define FW_VER_MAJOR 1
+#define FW_VER_MINOR 1
 
 /* Magic bytes returned by CMD_PING: ASCII "CSP". */
 #define PING_MAGIC0 'C'

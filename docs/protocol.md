@@ -178,6 +178,11 @@ bulk 端点的情况下确认固件版本和端点寄存器状态。上位机排
 | `0x20` | `CMD_STREAM_WRITE` | 流描述符 | 1 字节 |
 | `0x21` | `CMD_STREAM_READ` | 流描述符 | 数据 + 1 字节 |
 | `0x22` | `CMD_STREAM_XFER` | 流描述符 | 数据 + 1 字节 |
+| `0x23` | `CMD_NOR_PROGRAM` | `[addr24][len24]` + 数据 | 4 字节 |
+| `0x24` | `CMD_NOR_ERASE` | `[addr24][len24]` | 4 字节 |
+| `0x25` | `CMD_NAND_SET_CFG` | `[page16][oob16][flags]` | 1 字节 |
+| `0x26` | `CMD_NAND_READ_PAGES` | `[page24][npages16]` | 数据 + 1 字节 |
+| `0x27` | `CMD_NAND_PROGRAM_PAGES` | `[page24][npages16]` + 数据 | 4 字节 |
 | `0x30` | `CMD_GPIO_WRITE` | `[pin][value]`（0=WP, 1=HOLD） | 1 字节 |
 | `0x31` | `CMD_GPIO_READ` | `[pin]` | 2 字节 |
 | `0x40` | `CMD_BOOTLOADER` | — | 无（设备消失） |
@@ -238,6 +243,9 @@ capability 位：
 | `0x0008` | 支持 `CMD_SPI_XFER` / `CMD_SPI_READ` |
 | `0x0010` | 支持运行时修改 SPI 分频/模式 |
 | `0x0020` | 支持 GPIO 命令 |
+| `0x0040` | 支持 `CMD_NOR_PROGRAM` / `CMD_NOR_ERASE` |
+| `0x0080` | 支持 `CMD_NAND_*` 加速命令 |
+| `0x0100` | 支持 `CMD_NOR_ERASE` |
 
 ### 4.4 `CMD_SET_SPI_CFG` (0x04)
 
@@ -389,6 +397,100 @@ capability 位：
 
 设备重新枚举为 WCH USB bootloader（`0x4348:0x55E0`），用于升级固件。
 无回包；执行后设备会从 USB 上消失。
+
+---
+
+### 4.14 固件加速命令（NOR / NAND）
+
+`CMD_STREAM_*` 是通用路径：主机逐页发命令，设备只负责搬运。代价是每页
+3~5 次 USB 往返（WREN、PP、轮询状态），在 USB 全速下这是写速的主要瓶颈。
+
+下面这组命令把**每页的控制循环搬进设备**：主机一次命令 + 一整块数据，
+设备内部自己完成 WREN / 编程 / 等就绪 / 地址递增。所有命令都自己驱动
+CS，**不能和 `CMD_CS` 混用**（CS 已被拉低时返回 `ST_BUSY`）。
+
+> **字节序**：命令 payload 里的所有多字节字段（addr / len / count / page /
+> npages）一律**小端**。只有 SPI 前缀字节（真正移给 Flash 的命令码和地址）
+> 才按器件要求排列 —— NOR 的 24 位地址是 MSB first，这一点由主机负责，
+> 固件只负责原样移出。
+
+#### 通用回包格式
+
+除 `CMD_NAND_READ_PAGES` 外，加速命令回 **4 字节**：
+
+```
+[0] status
+[1..3] done（小端 24 位）
+```
+
+`done` 是**已经完成**的单位数（NOR 编程=字节，NOR 擦除=扇区，NAND 编程=
+页）。出错时主机据此知道断在哪里。
+
+#### `CMD_NOR_PROGRAM` (0x23)
+
+```
+payload : [addr0][addr1][addr2][len0][len1][len2]
+数据    : len 字节（原始数据帧，和 CMD_STREAM_WRITE 一样）
+回包    : 4 字节，done = 已编程字节数
+```
+
+设备按 256 B 页切分（不跨页），每页执行 `WREN(06)` → `PP(02)` →
+轮询 `RDSR(05)` 的 WIP。地址可以是任意值，页边界落在 USB 帧中间也能
+正确处理。
+
+#### `CMD_NOR_ERASE` (0x24)
+
+```
+payload : [addr24][len24]
+回包    : 4 字节，done = 已擦除扇区数
+```
+
+`addr` 和 `len` 都必须 4 KiB 对齐。每扇区 `WREN(06)` → `SE(20)` → 等 WIP。
+
+#### `CMD_NAND_SET_CFG` (0x25)
+
+```
+payload : [page_lo][page_hi][oob_lo][oob_hi][flags]
+回包    : 1 字节
+```
+
+| 字段 | 说明 |
+|---|---|
+| `page` | 主区大小（16 位），256..4096，默认 2048 |
+| `oob` | 备用区大小（16 位），0..512，默认 64 |
+| `flags` | bit0=1 时 READ FROM CACHE 用 `0Bh`（多 1 个 dummy），否则 `03h` |
+
+> **ECC**：固件对 OOB 完全透明，原样搬运。
+> * **片上 ECC**：先用 `SET FEATURE (1F B0)` 打开 ECC_EN（走
+>   `CMD_STREAM_WRITE`，prefix=`1F B0 xx`，count=0），然后每页写
+>   `page+oob` 字节，OOB 填 `0xFF` 让芯片自己填 ECC。
+> * **手动 OOB**：主机自己算 ECC，把结果放进 OOB 一起写。
+
+#### `CMD_NAND_READ_PAGES` (0x26)
+
+```
+payload : [page0][page1][page2][npages_lo][npages_hi]
+回包    : npages * (page + oob) 字节数据，最后 1 字节 status
+```
+
+每页：`PAGE READ(13)` + 24 位页地址 → 轮询 `GET FEATURE(0F C0)` 的
+OIP → `READ FROM CACHE(03/0B)` 从列地址 0 读出整页（主区 + OOB）。
+遇到 E_FAIL/P_FAIL 立即停止。
+
+#### `CMD_NAND_PROGRAM_PAGES` (0x27)
+
+```
+payload : [page24][npages16]
+数据    : npages * (page + oob) 字节
+回包    : 4 字节，done = 成功写入的页数
+```
+
+每页：`WREN(06)` → `PROGRAM LOAD(02)` + 列地址 0 + 数据 →
+`PROGRAM EXECUTE(10)` + 24 位页地址 → 轮询 OIP，并检查 E_FAIL/P_FAIL。
+坏块由主机根据 `done` 和状态寄存器决定跳过策略。
+
+> NAND 的块擦除仍然走通用路径：`CMD_STREAM_WRITE`，prefix=`D8 + 24 位
+> 页地址`，count=0。`CMD_NOR_ERASE` 只发 NOR 的 `20h`，不能用于 NAND。
 
 ---
 

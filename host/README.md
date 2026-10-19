@@ -122,7 +122,15 @@ python3 host/speedtest.py --no-write      # 只测读取速度
 python3 host/speedtest.py --erase-only -y # 只测擦除
 python3 host/speedtest.py --no-erase -y   # 目标区域已擦除时直接写
 python3 host/speedtest.py --pattern random --seed 7 -y
+python3 host/speedtest.py --engine fw -y   # 固件内循环（NOR 加速命令）
 ```
+
+`--engine` 选择谁执行每页的 WREN/PP/等 WIP：
+
+| 值 | 路径 | 说明 |
+|---|---|---|
+| `host`（默认） | `CMD_STREAM_WRITE` + 主机逐页循环 | 通用，任何 SPI 器件都能用 |
+| `fw` | `CMD_NOR_PROGRAM` / `CMD_NOR_ERASE` | 设备内部循环，省掉每页 3~5 次 USB 往返 |
 
 擦除和写入会覆盖目标区域，默认需要交互确认（非交互环境要加 `-y`）。
 `--addr` 与 `--size` 都要求 4 KiB 对齐。

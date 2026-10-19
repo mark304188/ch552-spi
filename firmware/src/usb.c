@@ -336,8 +336,8 @@ static void ep0_fill_status(void)
     ep0_buf[1] = 'S';
     ep0_buf[2] = 'P';
     ep0_buf[3] = PROTO_VERSION;
-    ep0_buf[4] = 1; /* firmware major, keep in sync with protocol.c */
-    ep0_buf[5] = 0; /* firmware minor */
+    ep0_buf[4] = FW_VER_MAJOR;
+    ep0_buf[5] = FW_VER_MINOR;
     ep0_buf[6] = UEP2_3_MOD;
     ep0_buf[7] = UEP2_CTRL;
     ep0_buf[8] = UEP3_CTRL;
