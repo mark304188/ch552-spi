@@ -107,10 +107,9 @@ static void stream_prefix(uint8_t n)
     uint8_t i;
 
     for (i = 0; i < n; i++) {
-        SPI0_DATA = stream_pre[i];
-        while (S0_R_FIFO == 0)
-            ;
-        SPI0_DATA; /* drain */
+        if (!spi_put(stream_pre[i])) {
+            return; /* bus did not clock; spi_bus_ok is cleared */
+        }
     }
 }
 
@@ -252,6 +251,10 @@ static uint8_t run_stream(uint8_t __xdata *p, uint8_t len, uint8_t dir)
         break;
     }
 
+    if (!spi_bus_ok && status == ST_OK) {
+        status = ST_ERR; /* SPI never clocked: report it to the host */
+    }
+
     if (own_cs) {
         CS_DEASSERT();
     }
@@ -368,7 +371,7 @@ static void cmd_spi_xfer(uint8_t __xdata *p, uint8_t n)
         usb_reply_buf[1 + i] = p[i];
     }
     spi_xfer_buf(usb_reply_buf + 1, usb_reply_buf + 1, n);
-    reply_begin((uint8_t)(n + 1), ST_OK);
+    reply_begin((uint8_t)(n + 1), spi_bus_ok ? ST_OK : ST_ERR);
     reply_commit();
 }
 
@@ -379,7 +382,7 @@ static void cmd_spi_read(uint8_t n)
         return;
     }
     spi_read_fill(usb_reply_buf + 1, n);
-    reply_begin((uint8_t)(n + 1), ST_OK);
+    reply_begin((uint8_t)(n + 1), spi_bus_ok ? ST_OK : ST_ERR);
     reply_commit();
 }
 
@@ -431,6 +434,7 @@ void proto_handle(uint8_t __xdata *frame, uint8_t n)
     cmd = frame[0];
     len = frame[1];
     p = frame + 2;
+    spi_bus_ok = 1;
 
     if (len > (uint8_t)(n - 2)) {
         reply_one(ST_LEN);

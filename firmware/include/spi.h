@@ -5,7 +5,7 @@
  *   - 1 byte tx FIFO + 1 byte rx FIFO, physically separated registers
  *   - a write to SPI0_DATA immediately starts a transfer (bS0_DATA_DIR=0)
  *   - S0_FREE==1 means the shift engine is idle (byte boundary gap)
- *   - S0_R_FIFO tells whether the rx FIFO holds a byte that must be drained
+ *   - S0_FREE is the only reliable "byte done" indication in master mode
  *   - clock = Fsys / SPI0_CK_SE, up to Fsys/2
  *   - CH552 always samples MISO on the rising edge of SCK, only mode 0 and
  *     mode 3 (idle low/high) are available
@@ -36,6 +36,11 @@
 
 void spi_init(uint8_t ck_se, uint8_t mode3);
 
+/* Cleared if a transfer had to be abandoned because the SPI bus never
+ * clocked (no chip, pin conflict, ...).  The protocol layer checks it and
+ * replies ST_ERR instead of returning silently corrupted data. */
+extern uint8_t spi_bus_ok;
+
 /* Discard anything left in the SPI FIFOs.  Called when a transaction is
  * started so an aborted transfer can never misalign the next one. */
 void spi_flush(void);
@@ -43,6 +48,10 @@ void spi_flush(void);
 /* Fast single byte exchange: write then drain. Used for short command
  * sequences where the scheduling cost of a loop is larger. */
 uint8_t spi_xfer(uint8_t dat);
+
+/* Send one byte, discarding the reply.  Returns 0 if the bus did not
+ * clock (and clears spi_bus_ok). */
+uint8_t spi_put(uint8_t dat);
 
 /* Transmit len bytes from buf. The rx FIFO is drained inline so it can
  * never overflow. */

@@ -1,31 +1,29 @@
 /*==========================================================================*
  * spi.c - CH552 hardware SPI0 master driver
  *
- * Performance design
- * ------------------
- * SPI0 has a 1 byte transmit FIFO and a 1 byte receive FIFO that are
- * physically separate, and writing SPI0_DATA is what starts a transfer.
- * That allows the classic pipelined byte loop:
+ * Completion detection
+ * --------------------
+ * The CH552 SPI0 status register exposes two candidate "byte done" bits:
  *
- *     SPI0_DATA = b;          ; queue the byte
- *     while (!S0_R_FIFO) ;    ; wait for the *previous* byte to land
- *     r = SPI0_DATA;          ; drain it, freeing the FIFO
+ *   S0_FREE    no shift in progress (documented as the master-mode way to
+ *              wait for a byte, and what the vendor SDK uses)
+ *   S0_R_FIFO  receive FIFO count
  *
- * Once the first byte is in flight the CPU can queue the next one before
- * the current byte has finished shifting, so the SCK gap between bytes is
- * only the handful of cycles the loop needs.  At Fsys = 24MHz and
- * SPI_CK_DIV2 (12MHz SCK) the loop is roughly matched to the 16 Fsys
- * cycles a byte takes on the wire, i.e. about 1.4 MB/s of SPI payload.
+ * S0_R_FIFO turned out to be unreliable in master mode on real hardware:
+ * polling it hangs forever, because the FIFO counters are only maintained
+ * for slave mode.  The loops below therefore wait on S0_FREE, exactly like
+ * CH554SPIMasterWrite/Read in the WCH SDK.
  *
- * Two rules keep the loop correct:
- *   - the rx FIFO is drained before the next write, otherwise a byte is
- *     lost (S0_IF_OV) and the stream becomes misaligned;
- *   - only one byte is ever written ahead, because the tx FIFO is one
- *     byte deep.
+ * Dead-bus protection
+ * -------------------
+ * A failed SPI transfer must never wedge the bridge, so the first byte of
+ * every transfer is waited for with a bounded spin.  If it times out the
+ * function gives up and sets spi_bus_ok = 0, which the protocol layer turns
+ * into an error reply.  The remaining bytes use the tight unbounded loop,
+ * because a bus that clocked the first byte will clock the rest.
  *
- * The pointer types are explicitly __xdata so SDCC emits direct MOVX
- * accesses.  Generic (3 byte) pointers would call __gptrget/__gptrput for
- * every byte and multiply the per-byte cost by roughly four.
+ * Cycle budget: one byte at SCK = Fsys/4 is 32 Fsys cycles, and the tight
+ * loop costs about 15, so the SPI clock, not the CPU, is the limit.
  *==========================================================================*/
 
 #include <ch552.h>
@@ -41,6 +39,22 @@
 /* Base SPI control word for 3-wire master mode with the outputs enabled.
  * bS0_MISO_OE stays 0 because MISO is an input in master mode. */
 #define SPI_CTRL_BASE (bS0_SCK_OE | bS0_MOSI_OE)
+
+/* Cleared when a transfer had to be abandoned (dead bus). */
+uint8_t spi_bus_ok;
+
+/* Wait for the shift engine to go idle.  Returns 0 on timeout. */
+static uint8_t spi_wait_idle(void)
+{
+    uint16_t spins = 2000;
+
+    while (S0_FREE == 0) {
+        if (--spins == 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
 
 void spi_init(uint8_t ck_se, uint8_t mode3)
 {
@@ -65,6 +79,7 @@ void spi_init(uint8_t ck_se, uint8_t mode3)
     P1_DIR_PU &= ~(uint8_t)bMISO;
 
     CS_DEASSERT();
+    spi_bus_ok = 1;
 }
 
 void spi_flush(void)
@@ -73,11 +88,26 @@ void spi_flush(void)
     SPI0_CTRL &= ~(uint8_t)bS0_CLR_ALL;
 }
 
+/* Send one byte, discarding the reply, with the dead-bus guard applied to
+ * every byte (used for the short command/address prefixes). */
+uint8_t spi_put(uint8_t dat)
+{
+    SPI0_DATA = dat;
+    if (!spi_wait_idle()) {
+        spi_bus_ok = 0;
+        return 0;
+    }
+    SPI0_DATA; /* drain */
+    return 1;
+}
+
 uint8_t spi_xfer(uint8_t dat)
 {
     SPI0_DATA = dat;
-    while (S0_R_FIFO == 0)
-        ;
+    if (!spi_wait_idle()) {
+        spi_bus_ok = 0;
+        return 0xFF;
+    }
     return SPI0_DATA;
 }
 
@@ -88,13 +118,20 @@ void spi_write(const uint8_t __xdata *buf, uint8_t len)
     if (n == 0) {
         return;
     }
-    do {
+
+    SPI0_DATA = *buf++;
+    if (!spi_wait_idle()) {
+        spi_bus_ok = 0; /* bus never clocked: give up */
+        return;
+    }
+    SPI0_DATA; /* drain */
+
+    while (--n) {
         SPI0_DATA = *buf++;
-        while (S0_R_FIFO == 0)
+        while (S0_FREE == 0)
             ;
-        /* Drain the rx FIFO; the received byte is not interesting here. */
         SPI0_DATA;
-    } while (--n);
+    }
 }
 
 void spi_xfer_buf(uint8_t __xdata *buf, uint8_t __xdata *rbuf, uint8_t len)
@@ -105,29 +142,19 @@ void spi_xfer_buf(uint8_t __xdata *buf, uint8_t __xdata *rbuf, uint8_t len)
         return;
     }
 
-    if (buf == rbuf) {
-        /* In-place exchange: DPTR can stay put for both the read and the
-         * write, which is the shortest possible loop body. */
-        do {
-            SPI0_DATA = *buf;
-            while (S0_R_FIFO == 0)
-                ;
-            *buf++ = SPI0_DATA;
-        } while (--n);
+    SPI0_DATA = *buf++;
+    if (!spi_wait_idle()) {
+        spi_bus_ok = 0;
         return;
     }
+    *rbuf++ = SPI0_DATA;
 
-    do {
-        /* Queue the byte. The write is accepted while the previous byte
-         * is still shifting, which keeps the inter-byte gap minimal. */
+    while (--n) {
         SPI0_DATA = *buf++;
-
-        /* Wait until the previous byte has landed in the rx FIFO. */
-        while (S0_R_FIFO == 0)
+        while (S0_FREE == 0)
             ;
-
         *rbuf++ = SPI0_DATA;
-    } while (--n);
+    }
 }
 
 void spi_read_fill(uint8_t __xdata *dst, uint8_t len)
@@ -137,10 +164,18 @@ void spi_read_fill(uint8_t __xdata *dst, uint8_t len)
     if (n == 0) {
         return;
     }
-    do {
-        SPI0_DATA = 0xFF; /* dummy byte that generates the SCK burst */
-        while (S0_R_FIFO == 0)
+
+    SPI0_DATA = 0xFF;
+    if (!spi_wait_idle()) {
+        spi_bus_ok = 0;
+        return;
+    }
+    *dst++ = SPI0_DATA;
+
+    while (--n) {
+        SPI0_DATA = 0xFF;
+        while (S0_FREE == 0)
             ;
         *dst++ = SPI0_DATA;
-    } while (--n);
+    }
 }

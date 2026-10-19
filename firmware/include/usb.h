@@ -22,7 +22,7 @@
 /* Vendor control request used to report firmware/endpoint state over EP0.
  * Works even if the bulk endpoints are misbehaving. */
 #define VENDOR_REQ_STATUS 0x42
-#define VENDOR_STATUS_LEN 16
+#define VENDOR_STATUS_LEN 32
 
 #define MAX_PACKET_SIZE 64
 #define EP0_SIZE 64

@@ -55,6 +55,11 @@
  * every including module emit a second vector table. */
 void usb_isr(void) __interrupt(INT_NO_USB) __using(1);
 
+/* Diagnostics shared with the EP0 status request (see usb.c). */
+extern volatile __idata uint16_t dbg_tick;
+extern __idata uint8_t dbg_phase;
+extern volatile __idata uint8_t dbg_cmd;
+
 void main(void)
 {
     /* 24 MHz system clock from the internal oscillator / PLL. */
@@ -80,9 +85,14 @@ void main(void)
              * next frame lands in the other half. */
             ep3_frame_ready = 0;
             ep3_had_frame = 1;
+            dbg_cmd = frame[0];
+            dbg_phase = 1;
             proto_handle(frame, n);
+            dbg_phase = 2;
         }
 
         usb_service();
+        dbg_tick++;
+        dbg_phase = 0;
     }
 }

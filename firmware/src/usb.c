@@ -110,6 +110,18 @@ static __idata uint8_t tx_half;
 /* Address of the half of the OUT buffer the SIE just filled. */
 static uint8_t __xdata *ep3_out_ptr;
 
+/* Diagnostics exposed through the EP0 status request.  They answer the
+ * "is the main loop alive and how often does the ISR fire" question
+ * without needing a UART. */
+volatile __idata uint16_t dbg_tick; /* incremented by the main loop */
+static volatile __idata uint8_t dbg_isr;   /* total USB interrupts     */
+static volatile __idata uint8_t dbg_out;   /* EP3 OUT events           */
+static volatile __idata uint8_t dbg_in;    /* EP2 IN events            */
+static volatile __idata uint8_t dbg_setup; /* EP0 SETUP events         */
+static volatile __idata uint8_t dbg_rxlen; /* last USB_RX_LEN          */
+volatile __idata uint8_t dbg_cmd;          /* last command dispatched  */
+__idata uint8_t dbg_phase;                 /* main loop progress marker */
+
 static __idata uint8_t dev_config;
 static __idata uint8_t dev_addr_pending;
 static __idata uint8_t reply_len; /* total bytes queued for the IN endpoint */
@@ -152,15 +164,15 @@ static volatile __idata uint8_t in_pre_len;
  * middle of the previous transfer. */
 void usb_in_arm(uint8_t len)
 {
-    uint32_t spins;
-
-    reply_len = 0;
-    reply_off = 0;
-
-    spins = 0;
-    while ((in_armed || in_pre_len) && ++spins < 200000UL) {
-        usb_service();
-    }
+    /* A command is starting, so any reply still queued from a previous
+     * one is stale (the host asked for something new).  Drop it instead of
+     * spinning: the old version waited for the host to consume it, which
+     * could stall the main loop for seconds if the host stopped reading. */
+    EA = 0;
+    in_armed = 0;
+    in_pre_len = 0;
+    UEP2_CTRL = (UEP2_CTRL & ~MASK_UEP_T_RES) | UEP_T_RES_NAK;
+    EA = 1;
 
     reply_len = len;
     reply_off = 0;
@@ -294,6 +306,11 @@ static __code const uint8_t *ep0_rom_src;
  * version before blaming the wiring. */
 static void ep0_fill_status(void)
 {
+    uint8_t i;
+
+    for (i = 0; i < VENDOR_STATUS_LEN; i++) {
+        ep0_buf[i] = 0;
+    }
     ep0_buf[0] = 'C';
     ep0_buf[1] = 'S';
     ep0_buf[2] = 'P';
@@ -311,7 +328,20 @@ static void ep0_fill_status(void)
                             ((in_pre_len ? 1 : 0) << 2));
     ep0_buf[13] = USB_CTRL;
     ep0_buf[14] = UDEV_CTRL;
-    ep0_buf[15] = 0;
+    ep0_buf[15] = ep3_had_frame;
+    ep0_buf[16] = ep3_frame_len;
+    ep0_buf[17] = reply_len;
+    ep0_buf[18] = reply_off;
+    ep0_buf[19] = in_pre_len;
+    ep0_buf[20] = dbg_rxlen;
+    ep0_buf[21] = (uint8_t)dbg_tick;
+    ep0_buf[22] = (uint8_t)(dbg_tick >> 8);
+    ep0_buf[23] = dbg_isr;
+    ep0_buf[24] = dbg_out;
+    ep0_buf[25] = dbg_in;
+    ep0_buf[26] = dbg_setup;
+    ep0_buf[27] = dbg_cmd;
+    ep0_buf[28] = dbg_phase;
 }
 
 static void ep0_setup(void)
@@ -338,7 +368,10 @@ static void ep0_setup(void)
         }
         ep0_fill_status();
         len = VENDOR_STATUS_LEN;
-        if (ep0_rem < len) {
+        /* Clamp to what the host asked for; otherwise the reply would
+         * carry whatever is left in ep0_buf from the previous descriptor
+         * transfer. */
+        if (ep0_rem > len) {
             ep0_rem = len;
         }
         len = ep0_rem >= EP0_SIZE ? EP0_SIZE : ep0_rem;
@@ -475,11 +508,14 @@ void usb_isr(void) __interrupt(INT_NO_USB) __using(1)
 {
     uint8_t token;
 
+    dbg_isr++;
+
     if (UIF_TRANSFER) {
         token = USB_INT_ST & (MASK_UIS_TOKEN | MASK_UIS_ENDP);
 
         switch (token) {
         case UIS_TOKEN_SETUP | 0:
+            dbg_setup++;
             ep0_setup();
             break;
 
@@ -492,7 +528,9 @@ void usb_isr(void) __interrupt(INT_NO_USB) __using(1)
             break;
 
         case UIS_TOKEN_OUT | 3:
+            dbg_out++;
             if (U_TOG_OK) {
+                dbg_rxlen = USB_RX_LEN;
                 ep3_out_ptr = ep3_buf + (rx_half ? MAX_PACKET_SIZE : 0);
                 ep3_frame_len = USB_RX_LEN;
                 ep3_frame_ready = 1;
@@ -506,6 +544,7 @@ void usb_isr(void) __interrupt(INT_NO_USB) __using(1)
             break;
 
         case UIS_TOKEN_IN | 2:
+            dbg_in++;
             in_armed = 0;
             if (in_pre_len) {
                 /* The other half was filled while this one was on the

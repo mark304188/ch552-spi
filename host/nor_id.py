@@ -52,7 +52,7 @@ CMD_SPI_XFER = 0x11
 # It keeps working when the bulk endpoints are dead, so it is used to tell
 # "old firmware" apart from "wrong wiring".
 VENDOR_REQ_STATUS = 0x42
-VENDOR_STATUS_LEN = 16
+VENDOR_STATUS_LEN = 32
 
 ST_OK = 0x00
 
@@ -131,8 +131,12 @@ class Bridge:
         except usb.core.USBError:
             return None
         raw = bytes(raw)
-        if len(raw) < VENDOR_STATUS_LEN or raw[:3] != b"CSP":
+        # The first 16 bytes are the stable part; newer builds append
+        # diagnostic counters.  Accept either length.
+        if len(raw) < 16 or raw[:3] != b"CSP":
             return None
+        if len(raw) < VENDOR_STATUS_LEN:
+            raw += bytes(VENDOR_STATUS_LEN - len(raw))
         return raw
 
     # ------------------------------------------------------------ 命令封装
@@ -280,11 +284,20 @@ def main():
         print("桥       : 固件 v%d.%d, 协议 v%d"
               % (st[4], st[5], st[3]))
         if args.status or args.verbose:
+            tick = st[21] | (st[22] << 8)
             print("寄存器   : UEP2_3_MOD=%02X UEP2_CTRL=%02X UEP3_CTRL=%02X"
-                  % (st[6], st[7], st[8]))
-            print("           UEP3_DMA_L=%02X frame_ready=%d rx_half=%d"
-                  " in=%02X USB_CTRL=%02X UDEV_CTRL=%02X"
-                  % (st[9], st[10], st[11], st[12], st[13], st[14]))
+                  " UEP3_DMA_L=%02X" % (st[6], st[7], st[8], st[9]))
+            print("主循环   : tick=%d phase=%d cmd=0x%02X"
+                  % (tick, st[28], st[27]))
+            print("中断计数 : isr=%d setup=%d out=%d in=%d"
+                  % (st[23], st[26], st[24], st[25]))
+            print("端点状态 : frame_ready=%d had_frame=%d frame_len=%d"
+                  " rx_half=%d in=0x%02X"
+                  % (st[10], st[15], st[16], st[11], st[12]))
+            print("回包状态 : reply_len=%d reply_off=%d in_pre_len=%d"
+                  % (st[17], st[18], st[19]))
+            print("控制     : USB_CTRL=%02X UDEV_CTRL=%02X"
+                  % (st[13], st[14]))
         if args.status:
             return 0
     else:
