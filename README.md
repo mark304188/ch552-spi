@@ -228,13 +228,14 @@ print("id", r[2:5].hex())                  # r[1] 是发送 0x9F 时的无效字
   | 固件内循环 6 MHz | 149 KiB/s | 126 KiB/s |
   | 固件内循环 12 MHz | **188 KiB/s** | 126 KiB/s |
 
-* SPI NAND（DS35M1GA，1.8V，2048+64，无 ECC）实测：
+* SPI NAND（DS35M1GA，1.8V，2048+64，无 ECC）实测（Windows/WinUSB，
+  1 MiB 校验通过）：
 
   | 路径 | 写入 | 读取 |
   |---|---|---|
   | 主机逐页（`CMD_STREAM_*`） | 42 KiB/s | 55 KiB/s |
   | 固件内循环 6 MHz | 195 KiB/s | 263 KiB/s |
-  | 固件内循环 12 MHz | **344 KiB/s** | **352 KiB/s** |
+  | 固件内循环 12 MHz | **434 KiB/s** | **438 KiB/s** |
 
 * NOR/NAND 的擦除、编程时间由芯片本身决定，固件只负责不引入额外等待。
 
