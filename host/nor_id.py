@@ -87,11 +87,18 @@ class Bridge:
         self.dev = dev
         self.verbose = verbose
 
+        # 设备已经配置好时不要再发 SET_CONFIGURATION：这条标准请求会把
+        # 两端的端点 toggle 归零，旧固件不跟着复位就会和主机错位。固件已
+        # 修复（见 usb_bulk_reset），这里仍然跳过这次多余的往返。
         try:
-            dev.set_configuration()
+            cfg = dev.get_active_configuration()
         except usb.core.USBError:
-            # 有些系统在 open 时已经配置过，忽略即可。
-            pass
+            cfg = None
+        if cfg is None or cfg.bConfigurationValue != 1:
+            try:
+                dev.set_configuration()
+            except usb.core.USBError:
+                pass
 
         try:
             if dev.is_kernel_driver_active(INTERFACE):

@@ -48,6 +48,12 @@ void usb_in_prime(void);              /* send the first chunk       */
 uint8_t __xdata *usb_in_claim(void);
 void usb_in_send(uint8_t len);
 
+/* Wait (bounded) until the last armed IN packet has been taken by the
+ * host.  Returns 0 if the host stopped draining.  Must be called before
+ * recycling the endpoint for a new reply, otherwise an in-flight chunk is
+ * abandoned and the IN data toggle desynchronises. */
+uint8_t usb_in_wait_idle(uint16_t budget);
+
 /*---------------------------------------------------------------*
  * Frame handshake between the ISR and the main loop             *
  *                                                               *

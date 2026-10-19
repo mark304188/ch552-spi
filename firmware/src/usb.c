@@ -157,17 +157,38 @@ static volatile __idata uint8_t in_half;
 static volatile __idata uint8_t in_armed;
 static volatile __idata uint8_t in_pre_len;
 
-/* Prepare a new reply of `len` bytes.
+/* Bounded spin while the SIE still owns the last IN packet.
  *
- * Waits for any chunks still in flight from the previous reply before
- * reusing the staging buffer, otherwise a status byte could land in the
- * middle of the previous transfer. */
+ * usb_service() is needed here because a prefilled half is only armed from
+ * there, and because it keeps the OUT endpoint re-armed. */
+uint8_t usb_in_wait_idle(uint16_t budget)
+{
+    while (in_armed || in_pre_len) {
+        usb_service();
+        if (--budget == 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Prepare a new reply of `len` bytes. */
 void usb_in_arm(uint8_t len)
 {
-    /* A command is starting, so any reply still queued from a previous
-     * one is stale (the host asked for something new).  Drop it instead of
-     * spinning: the old version waited for the host to consume it, which
-     * could stall the main loop for seconds if the host stopped reading. */
+    /* A command is starting.  Let any packet still on the wire finish
+     * before the buffers are recycled: arming a new chunk while the old one
+     * is in flight abandons it AND advances the data toggle, so the next
+     * packet carries the wrong PID and the host reports EIO.
+     *
+     * This is the normal path for streamed reads, where the status byte is
+     * queued immediately after the data chunks were armed. */
+    if (!usb_in_wait_idle(8000) && in_armed) {
+        /* The host stopped reading.  Reuse the half (and therefore the
+         * toggle) of the packet that was never taken, so the next transfer
+         * is still in phase with what the host expects. */
+        in_half ^= 1;
+    }
+
     EA = 0;
     in_armed = 0;
     in_pre_len = 0;
@@ -344,6 +365,29 @@ static void ep0_fill_status(void)
     ep0_buf[28] = dbg_phase;
 }
 
+/* USB 2.0 9.1.1.5: SET_CONFIGURATION puts every endpoint back to DATA0
+ * and cancels any pending transfer.  The host does exactly that, so the
+ * device has to follow: otherwise the first bulk packet after the host
+ * re-selects the configuration (every libusb open does) is seen as a
+ * toggle error and silently dropped, and the bridge looks dead until the
+ * next replug. */
+static void usb_bulk_reset(void)
+{
+    rx_half = 0;
+    in_half = 0;
+    in_armed = 0;
+    in_pre_len = 0;
+    ep3_frame_ready = 0;
+    ep3_had_frame = 0;
+    ep3_frame_len = 0;
+    ep3_out_ptr = ep3_buf;
+    reply_len = 0;
+    reply_off = 0;
+
+    UEP2_CTRL = UEP_T_RES_NAK;
+    UEP3_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK;
+}
+
 static void ep0_setup(void)
 {
     uint8_t len, req;
@@ -448,6 +492,11 @@ static void ep0_setup(void)
 
     case USB_SET_CONFIGURATION:
         dev_config = UsbSetupBuf->wValueL;
+        usb_bulk_reset();
+        break;
+
+    case USB_SET_INTERFACE:
+        usb_bulk_reset();
         break;
 
     case USB_GET_STATUS:
@@ -567,19 +616,10 @@ void usb_isr(void) __interrupt(INT_NO_USB) __using(1)
 
     if (UIF_BUS_RST) {
         proto_reset();
-        reply_len = 0;
-        reply_off = 0;
         dev_config = 0;
-        ep3_frame_ready = 0;
-        rx_half = 0;
-        in_half = 0;
-        in_armed = 0;
-        in_pre_len = 0;
-        ep3_out_ptr = ep3_buf;
+        usb_bulk_reset();
 
         UEP0_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK;
-        UEP2_CTRL = UEP_T_RES_NAK;
-        UEP3_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK;
         USB_DEV_AD = 0x00;
 
         UIF_SUSPEND = 0;

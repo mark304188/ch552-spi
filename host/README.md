@@ -71,6 +71,62 @@ JEDEC ID : FF FF FF FF
 
 完整的帧格式和命令表见 [`../docs/protocol.md`](../docs/protocol.md)。
 
+## `speedtest.py` — 擦除 / 写入 / 读回速度测试
+
+一条命令跑完「擦除 → 逐页编程 → 读回校验」，每个阶段单独计时。默认走
+流式命令（`CMD_STREAM_*`），也就是实际烧录的路径。
+
+```bash
+python3 host/speedtest.py                 # 64 KiB @ 0x000000，6 MHz
+python3 host/speedtest.py --size 1M -y    # 1 MiB
+python3 host/speedtest.py --div 2 -y      # 12 MHz
+python3 host/speedtest.py --no-write      # 只测读取速度
+python3 host/speedtest.py --erase-only -y # 只测擦除
+python3 host/speedtest.py --no-erase -y   # 目标区域已擦除时直接写
+python3 host/speedtest.py --pattern random --seed 7 -y
+```
+
+擦除和写入会覆盖目标区域，默认需要交互确认（非交互环境要加 `-y`）。
+`--addr` 与 `--size` 都要求 4 KiB 对齐。
+
+输出示例（W25Q32，12 MHz，VirtualBox 直通）：
+
+```
+状态轮询 : 11.09 ms/次（WIP 等待的时间分辨率）
+
+[1] 擦除 16 个 4 KiB 扇区 ...
+    完成，用时 0.910 s
+    平均 56.9 ms/扇区, 70.3 KiB/s
+
+[2] 编程 256 页 x 256 B (counter 模式) ...
+    发送/SPI : 2.929 s  (21.9 KiB/s)  <- 桥 + USB 的写入开销
+    等待 tPP : 3.027 s  (平均 11.82 ms/页)
+    合计     : 7.952 s  (8.0 KiB/s, 平均 31.06 ms/页)
+
+[3] 读回 64.0 KiB ...
+    用时 0.176 s  (363.9 KiB/s)
+
+[4] 校验 64.0 KiB ...
+    一致，65536 字节全部匹配
+```
+
+**怎么读这些数字**
+
+| 指标 | 含义 |
+|---|---|
+| `发送/SPI` | 主机把一页数据送进桥并移出到 SPI 的时间，**桥本身的写入开销** |
+| `等待 tPP` | Flash 自己的页编程时间，外加 WIP 轮询的时间分辨率 |
+| `读取` | 桥 → 主机的流式读吞吐，实际烧录校验时的上限 |
+| `状态轮询` | 每次读状态寄存器（含 USB 往返）的耗时，决定了写速的下限 |
+
+写速的瓶颈通常不是 SPI，而是**每页两次 USB 往返**（WREN、PP）加上 WIP
+轮询。VirtualBox/USB 直通的往返约 2~4 ms/次，所以一页 30 ms 里有 25 ms
+是 USB 延迟。裸机上会明显更快；要进一步提速，需要固件提供「按地址连续
+编程」的复合命令（设备内部完成 WREN/PP/轮询），把往返摊薄到整块数据。
+
+> 注意：擦除和编程前都必须先发 WREN（0x06）。脚本已经处理；自己写上位机
+> 时最容易漏掉这一步，表现为“命令都成功但数据没变”。
+
 ## 后续扩展建议
 
 如果之后要在本目录里继续做完整工具，建议结构：
@@ -81,6 +137,7 @@ host/
 │   ├── device.py        USB 枚举 / bulk 收发
 │   ├── protocol.py      组帧 / 解帧 / 命令常量
 │   └── flash.py         NOR / NAND 高层操作（擦除、页编程、校验）
+├── speedtest.py         速度/一致性测试（已有）
 ├── ch552prog.py         CLI：id / read / write / erase / verify
 └── c/                   libusb 版本（可选）
 ```
