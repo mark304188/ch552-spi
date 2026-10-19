@@ -123,9 +123,13 @@ static uint8_t stream_write(uint32_t total)
         if (total < n) {
             n = (uint8_t)total;
         }
+        /* Hand the buffer back before shifting it out: the SIE can then
+         * take the next frame into the other half while the SPI engine is
+         * busy.  The double buffer guarantees the half we are reading is
+         * not re-used until the next frame has been consumed and released. */
+        stream_release_frame();
         spi_write(stream_frame, n);
         total -= n;
-        stream_release_frame();
     }
     return ST_OK;
 }
@@ -184,10 +188,10 @@ static uint8_t stream_xfer(uint32_t total)
             }
         }
 
+        stream_release_frame();
         spi_xfer_buf(stream_frame, in, n);
         usb_in_send(n);
         total -= n;
-        stream_release_frame();
     }
     return ST_OK;
 }
@@ -396,8 +400,14 @@ static uint8_t nor_program(void)
             if (acc_left < (uint32_t)n) {
                 n = (uint8_t)acc_left;
             }
-            spi_write(stream_frame + pend_off, n);
-            out_consume(n);
+            if (n == pend_len) {
+                uint8_t __xdata *p = stream_frame + pend_off;
+                out_consume(n); /* release first: overlap USB and SPI */
+                spi_write(p, n);
+            } else {
+                spi_write(stream_frame + pend_off, n);
+                out_consume(n);
+            }
             acc_left -= n;
             acc_total -= n;
             acc_addr += n;
@@ -548,8 +558,14 @@ static uint8_t nand_program_pages(void)
             if (acc_left < (uint32_t)n) {
                 n = (uint8_t)acc_left;
             }
-            spi_write(stream_frame + pend_off, n);
-            out_consume(n);
+            if (n == pend_len) {
+                uint8_t __xdata *p = stream_frame + pend_off;
+                out_consume(n); /* release first: overlap USB and SPI */
+                spi_write(p, n);
+            } else {
+                spi_write(stream_frame + pend_off, n);
+                out_consume(n);
+            }
             acc_left -= n;
         }
         CS_DEASSERT();
