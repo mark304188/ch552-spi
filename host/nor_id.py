@@ -193,8 +193,9 @@ def report(jdec):
         print("诊断: 读回全 0xFF，MOSI/MISO 上没有器件回应。可能原因：")
         print("  - Flash 未供电，或 CS/SCK/MOSI/MISO 接线错误")
         print("  - CS 没有真正拉低（检查 P1.4 与 Flash 的 CS#）")
-        print("  - /HOLD (pin 7) 被拉低或悬空：必须用 10k 上拉到 3.3V，")
-        print("    否则芯片完全不响应（这是读回全 FF 最常见的原因）")
+        print("  - /HOLD (pin 7) 被拉低或悬空：芯片会完全不响应")
+        print("    本固件默认把 P3.4 驱高；如果这块板子没接 /HOLD，")
+        print("    请用 10k 上拉到 3.3V（读回全 FF 最常见的原因）")
         print("  - SPI 时钟太快（试 --div 8 或 16）")
         return False
 

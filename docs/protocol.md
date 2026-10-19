@@ -119,7 +119,7 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="5507", MODE="0666"
 | `0x20` | `CMD_STREAM_WRITE` | 流描述符 | 1 字节 |
 | `0x21` | `CMD_STREAM_READ` | 流描述符 | 数据 + 1 字节 |
 | `0x22` | `CMD_STREAM_XFER` | 流描述符 | 数据 + 1 字节 |
-| `0x30` | `CMD_GPIO_WRITE` | `[pin][value]` | 1 字节 |
+| `0x30` | `CMD_GPIO_WRITE` | `[pin][value]`（0=WP, 1=HOLD） | 1 字节 |
 | `0x31` | `CMD_GPIO_READ` | `[pin]` | 2 字节 |
 | `0x40` | `CMD_BOOTLOADER` | — | 无（设备消失） |
 
@@ -304,14 +304,22 @@ capability 位：
 
 ### 4.11 `CMD_GPIO_WRITE` (0x30)
 
-控制辅助 GPIO（默认 `pin = 0` 是目标 `/RESET`）。
+控制辅助 GPIO。
 
 * payload：`[pin][value]`
-  * `pin`：引脚索引，映射关系由固件的 `board.h` 决定（见
-    [`hardware.md`](hardware.md)）。默认索引 0 = `P1.3`。
-  * `value`：`0` = 拉低（有效），`1` = 释放（由目标板上拉决定高电平）
-* 引脚是**开漏**驱动：释放时不会主动输出高电平，因此不会和板上的其它
-  驱动器打架。如果目标板没有上拉，需要外加 10 kΩ 到 3.3 V。
+  * `pin`：引脚索引，映射由固件的 `board.h` 决定。默认布局：
+
+    | 索引 | 引脚 | 接 Flash | 默认 |
+    |---|---|---|---|
+    | 0 | `P3.2` | `/WP` | 高（可写） |
+    | 1 | `P3.4` | `/HOLD` | 高（正常） |
+    | 2/3 | — | 未使用 | — |
+
+  * `value`：`0` = 拉低（有效），`1` = 非有效电平
+* 默认驱动方式为推挽，`value=1` 会**主动输出高电平**；如果 `board.h` 里
+  把该槽位改成 `BOARD_GPIO_OD`，则 `value=1` 为高阻（依赖外部上拉）。
+* 上电时固件已把所有槽位驱到高电平，所以不操作时 Flash 处于可写、可
+  响应状态。
 * 回包：1 字节 `status`（`ST_OK` / `ST_PARAM`，索引不存在时返回后者）。
 
 ### 4.12 `CMD_GPIO_READ` (0x31)

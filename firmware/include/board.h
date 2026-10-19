@@ -12,12 +12,21 @@
  *
  *     BOARD_CS_BIT      chip select (default P1.4, the SPI0 SCS pin,
  *                       which is a normal GPIO in master mode)
- *     BOARD_GPIO*_BIT   auxiliary pins exposed through CMD_GPIO_*
+ *     BOARD_GPIO*       auxiliary pins (/WP, /HOLD, ...)
  *
  * Chip select may be any free P1 pin: P1.0 .. P1.4.  P1.5/6/7 are taken by
- * the SPI peripheral.  All auxiliary GPIOs are driven open-drain, which is
- * the safe way to drive a target reset line (the target's pull-up defines
- * the inactive level, and there is no contention with another driver).
+ * the SPI peripheral.
+ *
+ * The auxiliary pin table defaults to the wiring used by the common
+ * CH552 SPI-NOR/SPI-NAND programmer boards:
+ *
+ *     index 0 : P3.2 -> flash /WP    (write protect, active low)
+ *     index 1 : P3.4 -> flash /HOLD  (hold,          active low)
+ *
+ * Both are push-pull outputs and are driven HIGH at power-up, so the flash
+ * is writable and responsive even on boards without external pull-ups.
+ * Change BOARD_GPIO*_MODE to BOARD_GPIO_OD if the target board already
+ * pulls those lines up and the programmer must not drive them hard.
  *==========================================================================*/
 
 #ifndef __BOARD_H__
@@ -43,35 +52,49 @@ SBIT(board_cs, 0x90, BOARD_CS_BIT);
 #define CS_DEASSERT() (board_cs = 1)
 
 /*---------------------------------------------------------------*
- * Auxiliary GPIOs (CMD_GPIO_WRITE / CMD_GPIO_READ)             *
+ * Auxiliary GPIOs (CMD_GPIO_WRITE / CMD_GPIO_READ)              *
  *                                                              *
- * The index in the command payload selects the entry, so pin 0 is *
- * BOARD_GPIO0_BIT.  Use 0xFF for an unused slot.                *
+ * Each slot is described by a port number (1 or 3), a bit number *
+ * and a drive mode.  The index in the command payload selects the *
+ * slot, so changing the wiring never changes the host protocol.   *
  *---------------------------------------------------------------*/
 
-/* Index 0 is left unconnected by default.  Wire it to the flash /WP pin
- * if the host should be able to switch write protection on and off; the
- * pin is open drain, so "released" relies on the 10k pull-up that /WP
- * needs anyway.  Wire it to a target /RESET line instead if the board has
- * one. */
-#define BOARD_GPIO0_BIT 3    /* P1.3 */
-#define BOARD_GPIO1_BIT 0xFF /* unused */
-#define BOARD_GPIO2_BIT 0xFF /* unused */
-#define BOARD_GPIO3_BIT 0xFF /* unused */
+/* Drive modes. */
+#define BOARD_GPIO_PP 0 /* push-pull output, drives both levels       */
+#define BOARD_GPIO_OD 1 /* open drain, releasing needs a pull-up      */
+#define BOARD_GPIO_IN 2 /* high impedance input                       */
 
-#define BOARD_GPIO_NONE 0xFF
+/* Slot 0: flash /WP on P3.2 */
+#define BOARD_GPIO0_PORT 3
+#define BOARD_GPIO0_BIT 2
+#define BOARD_GPIO0_MODE BOARD_GPIO_PP
+
+/* Slot 1: flash /HOLD on P3.4 */
+#define BOARD_GPIO1_PORT 3
+#define BOARD_GPIO1_BIT 4
+#define BOARD_GPIO1_MODE BOARD_GPIO_PP
+
+/* Slots 2 and 3: unused (port 0xFF). */
+#define BOARD_GPIO2_PORT 0xFF
+#define BOARD_GPIO2_BIT 0
+#define BOARD_GPIO2_MODE BOARD_GPIO_IN
+
+#define BOARD_GPIO3_PORT 0xFF
+#define BOARD_GPIO3_BIT 0
+#define BOARD_GPIO3_MODE BOARD_GPIO_IN
 
 /*---------------------------------------------------------------*
  * Entry points                                                 *
  *---------------------------------------------------------------*/
 
-/* Put every board-owned pin into its idle state (CS released, auxiliary
- * pins released).  Called once from main() before USB enumerates. */
+/* Put every board-owned pin into its idle state: CS released, auxiliary
+ * pins driven to their inactive (high) level.  Called once from main()
+ * before USB enumerates. */
 void board_init(void);
 
-/* Drive an auxiliary pin: level 0 asserts (pulls low), 1 releases it.
- * `index` is the value used on the wire by CMD_GPIO_*. Returns 0 on
- * success, non-zero if the index does not exist. */
+/* Drive an auxiliary pin.  level 0 = assert (low), 1 = inactive (high or
+ * released, depending on the slot's drive mode).  Returns 0 on success,
+ * non-zero if the index does not exist. */
 uint8_t board_gpio_write(uint8_t index, uint8_t level);
 
 /* Read back an auxiliary pin.  Returns 0/1 in bit 0, or 0xFF if the index

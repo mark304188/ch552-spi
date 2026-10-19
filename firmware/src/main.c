@@ -24,7 +24,8 @@
  *     P1.6  MISO<- SO / IO1
  *     P1.5  MOSI-> SI / IO0
  *     P1.4  CS# -> CS#
- *     P1.3      -> RST#      (optional, CMD_GPIO_WRITE, open drain)
+ *     P3.2  /WP -> /WP       (driven high at boot, CMD_GPIO_WRITE index 0)
+ *     P3.4 /HOLD -> /HOLD    (driven high at boot, CMD_GPIO_WRITE index 1)
  *     3V3       -> VCC
  *     GND       -> GND
  *
@@ -32,6 +33,10 @@
  * SCS pin, which is a normal GPIO in master mode and is therefore used as
  * a software-driven chip select: that is what lets one command keep CS
  * asserted across a whole flash sequence.
+ *
+ * P3.2/P3.4 default to the common CH552 programmer layout (/WP and /HOLD).
+ * They are push-pull outputs driven high at boot, so a flash is writable
+ * even on boards without external pull-ups.
  *==========================================================================*/
 
 #include <ch552.h>

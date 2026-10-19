@@ -98,8 +98,9 @@ WCH bootloader。
 ## 硬件连接
 
 默认引脚（详见 [`docs/hardware.md`](docs/hardware.md)）。SPI 的三根数据/时钟
-脚由芯片固定，**片选和辅助 GPIO 全部集中在 `firmware/include/board.h`**，
-改一个宏即可换引脚：
+脚由芯片固定，**片选和 `/WP`、`/HOLD` 等辅助 GPIO 全部集中在
+`firmware/include/board.h`**，改几个宏即可换引脚。默认布局对应常见的
+CH552 编程器板：
 
 | CH552 | 方向 | SPI Flash | 说明 |
 |-------|------|-----------|------|
@@ -107,7 +108,8 @@ WCH bootloader。
 | P1.6  | 输入 | SO / IO1  | SPI0 MISO |
 | P1.5  | 输出 | SI / IO0  | SPI0 MOSI |
 | P1.4  | 输出 | CS#       | 软件片选，可在 `board.h` 改 |
-| P1.3  | 开漏 | 可选      | 默认不接；需要软件控制写保护时接 `/WP`，`board.h` 可改 |
+| P3.2  | 输出 | /WP       | 推挽，上电为高（可写），`board.h` 可改 |
+| P3.4  | 输出 | /HOLD     | 推挽，上电为高（正常响应），`board.h` 可改 |
 | 3V3   | 电源 | VCC       | CH552 内部 LDO 输出能力有限，建议外部 3.3 V |
 | GND   | —    | GND       | |
 

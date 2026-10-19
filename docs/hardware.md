@@ -74,13 +74,27 @@ make FREQ_SYS=12000000
  * 可以改成任意空闲的 P1.0 ~ P1.4。 */
 #define BOARD_CS_BIT 4
 
-/* 辅助 GPIO：索引 0 默认 P1.3，可改成任意空闲 P1 脚；
- * 0xFF 表示不使用该槽位。默认不接，需要时接 /WP 或 /RESET。 */
-#define BOARD_GPIO0_BIT 3      /* P1.3 */
-#define BOARD_GPIO1_BIT 0xFF
-#define BOARD_GPIO2_BIT 0xFF
-#define BOARD_GPIO3_BIT 0xFF
+/* 辅助 GPIO：端口 + 位 + 驱动方式，最多 4 个槽位。
+ * 端口可以是 1 或 3（即 P1.x / P3.x），0xFF 表示槽位未使用。 */
+#define BOARD_GPIO0_PORT 3          /* P3.2 -> /WP              */
+#define BOARD_GPIO0_BIT  2
+#define BOARD_GPIO0_MODE BOARD_GPIO_PP
+
+#define BOARD_GPIO1_PORT 3          /* P3.4 -> /HOLD            */
+#define BOARD_GPIO1_BIT  4
+#define BOARD_GPIO1_MODE BOARD_GPIO_PP
+
+#define BOARD_GPIO2_PORT 0xFF       /* 未使用                    */
+#define BOARD_GPIO3_PORT 0xFF       /* 未使用                    */
 ```
+
+驱动方式三选一：
+
+| `BOARD_GPIO*_MODE` | 含义 | 适用场景 |
+|---|---|---|
+| `BOARD_GPIO_PP` | 推挽输出，两电平都主动驱动（默认） | `/WP`、`/HOLD`：板上没有上拉也能工作 |
+| `BOARD_GPIO_OD` | 开漏，释放时为高阻 | 目标板已有上拉，不想硬驱动 |
+| `BOARD_GPIO_IN` | 高阻输入 | 只读，比如接 NAND 的 R/B# |
 
 改完之后重新 `make` 即可，其它代码（SPI 初始化、方向配置、CS 时序、
 `CMD_GPIO_*` 命令）会自动跟着变。板上还有 `board.c` 负责上电时把这些
@@ -98,11 +112,21 @@ WCH 官方例程也是这么做的。
 
 ### 2.3 辅助 GPIO
 
-* **开漏**驱动：写 0 拉低，写 1 释放（高阻）。这是驱动目标复位线最安全
-  的方式，不会和板上其它驱动器冲突。
-* 如果目标板没有上拉电阻，需要外部加 10 kΩ 到 3.3 V。
-* 索引与物理引脚的映射在 `board.h`，上位机用索引访问，因此换板子不需要
-  改上位机代码。
+默认映射（对应常见 CH552 编程器板）：
+
+| 索引 | 引脚 | 接 Flash | 默认电平 |
+|---|---|---|---|
+| 0 | P3.2 | `/WP` | **高**（可写） |
+| 1 | P3.4 | `/HOLD` | **高**（芯片正常响应） |
+| 2/3 | — | 未使用 | — |
+
+* 上电时 `board_init()` 会把它们都驱到**高电平**，所以即使板上没有上拉
+  电阻，Flash 也是可写、可响应的状态。
+* `CMD_GPIO_WRITE pin=0 value=0` 拉低 `/WP` → 写保护；`value=1` 恢复可写。
+* `CMD_GPIO_WRITE pin=1 value=0` 拉低 `/HOLD` → 芯片停止响应（可以用来
+  验证接线，或让共享总线的另一颗片子彻底让出）。
+* 驱动方式由 `board.h` 的 `BOARD_GPIO*_MODE` 决定（推挽 / 开漏 / 输入），
+  换板子只改这一个文件，上位机命令不用变。
 
 方向配置（`spi_init()` 里完成）：
 
@@ -119,18 +143,18 @@ MISO 不要加上拉：Flash 在未被选中时会把 SO 置为高阻，上拉�
 
 | 引脚 | 用途 | 控制方式 |
 |---|---|---|
-| P1.3 | 辅助 GPIO（开漏），默认不接；可接 `/WP` 或 `/RESET` | `CMD_GPIO_WRITE`，pin = 0 |
+| P3.2 | `/WP`（推挽，默认高 = 可写） | `CMD_GPIO_WRITE`，pin = 0，value 0 = 写保护 |
+| P3.4 | `/HOLD`（推挽，默认高 = 正常） | `CMD_GPIO_WRITE`，pin = 1，value 0 = 保持 |
+| P1.0 ~ P1.3 | 未使用 | 可自行在 `board.h` 里改成辅助 GPIO |
 | P3.0/P3.1 | UART0 调试口（仅 `DE_PRINTF=1` 时编译） | 115200 8N1 |
-| P3.2/P3.3 | 未使用 | 可自行在 `board.h` 里改成辅助 GPIO |
 
-`P1.3` 上电后是高阻（开漏释放），不会影响目标板；需要动作时由上位机
-显式拉低。它**不是必须接**的：标准 SOIC-8 的 NOR/NAND 没有复位脚，
-`/WP` 和 `/HOLD` 用两个上拉电阻处理即可（见下一节）。
+`/WP` 和 `/HOLD` 由固件主动驱动，因此**不需要外部上拉电阻**（目标板上
+原有的上拉也不会冲突，因为固件输出高电平）。如果目标板上有其它驱动器
+接在同一根线上，把对应槽位改成 `BOARD_GPIO_OD` 更安全。
 
 > 如果要接 NAND 的 R/B#：最简单的做法是用 `0F C0` 读 feature 寄存器判断
-> OIP，不需要额外接线。确实需要硬件握手时，把 `BOARD_GPIO1_BIT` 改成
-> `P3.2`/`P3.3` 即可——但 `board.c` 目前按开漏输出配置辅助引脚，做输入
-> 需要把对应槽位改成高阻输入（`gpio_drive` 里一行改动）。
+> OIP，不需要额外接线。确实需要硬件握手时，把某个槽位改成
+> `BOARD_GPIO_IN` 并接到 R/B# 即可，`CMD_GPIO_READ` 可以读回电平。
 
 ## 4. 接线示例（SPI NOR，SOIC-8）
 
@@ -153,41 +177,45 @@ P1.7  SCK    ─── 6  CLK
 P1.6  MISO   ─── 2  DO (IO1)
 P1.5  MOSI   ─── 5  DI (IO0)
 P1.4  CS#    ─── 1  CS#
+P3.2  /WP    ─── 3  /WP   (IO2)
+P3.4  /HOLD  ─── 7  /HOLD (IO3)
 3V3          ─── 8  VCC
 GND          ─── 4  GND
-
-                 3  /WP   (IO2) ── 10k ── 3V3
-                 7  /HOLD (IO3) ── 10k ── 3V3
 ```
 
-`/WP` 和 `/HOLD` **不接 MCU，但必须各用一个 10 kΩ 上拉到 3.3 V**：
+`/WP` 和 `/HOLD` 都接到 MCU，由固件**主动驱动为高**（推挽输出），所以：
 
-* `/WP` 为低时芯片忽略所有 program/erase 命令（读和读 ID 不受影响），
-  典型症状是"能认 ID，写不进去"。
-* `/HOLD` 为低时芯片连时钟都不响应，典型症状是**读 ID 返回全 `FF`**。
-* 不要靠芯片内部上拉：通常只有几十 µA 的弱上拉，长线或干扰下不可靠，
-  各家 datasheet 的典型应用电路都要求外部 10 kΩ。
+* **不需要外部上拉电阻**；目标板上原有的 10 kΩ 上拉也完全兼容。
+* `/WP` 为低时芯片忽略所有 program/erase 命令（读和读 ID 不受影响）。
+* `/HOLD` 为低时芯片连时钟都不响应，读 ID 会返回全 `FF` —— 这是最容易
+  误判成"没接芯片"的故障。固件上电即把它拉高，从根上避免这个坑。
 
 > 少数型号（例如 W25Q32FW 的 IM 订购选项）把 pin 3 复用为 `/RESET`
-> 而不是 `/WP`，此时 pin 3 同样只需要 10 kΩ 上拉。
+> 而不是 `/WP`，接线相同，固件把它当普通高电平即可。
 
-### 4.1 需要软件控制写保护时
+### 4.1 写保护与保持控制
 
-把 `/WP` 改接到 P1.3（辅助 GPIO 0），保留那个 10 kΩ 上拉：
-
-```
-P1.3  ─── 3  /WP (IO2) ── 10k ── 3V3
-```
-
-辅助 GPIO 是开漏驱动，"释放"为高阻，由上拉拉高：
+两条命令即可切换：
 
 | 操作 | 效果 |
 |---|---|
 | `CMD_GPIO_WRITE pin=0 value=0` | 拉低 `/WP` → 写保护 |
-| `CMD_GPIO_WRITE pin=0 value=1` | 释放 → 上拉拉高 → 可写 |
+| `CMD_GPIO_WRITE pin=0 value=1` | 拉高 `/WP` → 可写（默认） |
+| `CMD_GPIO_WRITE pin=1 value=0` | 拉低 `/HOLD` → 芯片停止响应 |
+| `CMD_GPIO_WRITE pin=1 value=1` | 拉高 `/HOLD` → 正常（默认） |
+| `CMD_GPIO_READ pin=0 / 1` | 回读当前电平 |
 
-固件默认上电即释放，所以不操作时芯片处于可写状态。如果希望开机就是
-保护状态，把 `board.c` 的 `board_init()` 里该引脚改成 `board_gpio_write(0, 0)`。
+典型用法：
+
+* **验证写保护**：把 `pin=0` 拉低后再发页编程，命令会被芯片忽略，用来
+  确认 SRP 保护逻辑或测试时序。
+* **共享总线**：把 `pin=1` 拉低可以让同一总线上的另一颗芯片彻底让出
+  （比只拉高 CS 更彻底）。
+* **恢复被锁的片子**：有些板子把 `/WP` 硬件接死在低电平，表现为"能认
+  ID、写不进去"。用 `CMD_GPIO_READ pin=0` 读回 0 即可确认。
+
+如果目标板上已有其它驱动器接在这两根线上，把 `board.h` 里对应的
+`BOARD_GPIO*_MODE` 改成 `BOARD_GPIO_OD`（开漏），避免硬顶。
 
 ## 5. 接线示例（SPI NAND，WSON8）
 
@@ -197,11 +225,10 @@ P1.7  SCK    ─── CLK
 P1.6  MISO   ─── DO (IO1)
 P1.5  MOSI   ─── DI (IO0)
 P1.4  CS#    ─── CS#
+P3.2  /WP    ─── /WP   (IO2)
+P3.4  /HOLD  ─── /HOLD (IO3)
 3V3          ─── VCC
 GND          ─── GND
-
-                 3  /WP   (IO2) ── 10k ── 3V3
-                 7  /HOLD (IO3) ── 10k ── 3V3
 ```
 
 规则和 NOR 完全一样。NAND 的 `R/B#` 只有在 TSOP48 之类的大封装上才有，
@@ -219,6 +246,10 @@ WSON8 没有这个脚；等待内部操作完成用 `GET FEATURE (0F C0)` 轮询
 * Flash 的 VCC 就近放 0.1 µF + 1 µF 去耦。
 * 如果目标板自己给 Flash 供电，务必**断开 CH552 的 3V3 到目标 VCC**，
   只共地，否则两边 LDO 会打架。
+* 在板烧录且目标板不加电时，`/WP`、`/HOLD` 被 MCU 推挽驱动为高，会经
+  Flash 的 ESD 保护二极管给目标板"漏电"。目标板功耗很小的话，建议在这
+  两根线上各串 100~330 Ω，或者把 `board.h` 里对应槽位改成
+  `BOARD_GPIO_OD` 并依赖目标板自带的上拉。
 
 ## 7. 固件升级
 

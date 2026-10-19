@@ -123,12 +123,13 @@
 /* Maximum number of prefix bytes a stream command may carry. */
 #define MAX_PREFIX 8
 
-/* GPIO pin indices used by CMD_GPIO_*.  The index maps to a physical pin
- * through the BOARD_GPIO*_BIT table in board.h.  Auxiliary pins are driven
- * open drain, so value 0 pulls low and value 1 releases the line (an
- * external pull-up then brings it high).  Index 0 is wired by the board;
- * it is typically the flash /WP pin (write protect) or a target reset. */
-#define PIN_RESET 0
+/* GPIO pin indices used by CMD_GPIO_*.
+ *
+ * The index maps to a physical pin through the BOARD_GPIO* table in
+ * board.h.  value 0 = assert (drive low), 1 = inactive (drive high, or
+ * release on open-drain slots).  With the default board mapping: */
+#define PIN_WP 0   /* P3.2 -> flash /WP   0 = write protected */
+#define PIN_HOLD 1 /* P3.4 -> flash /HOLD 0 = hold (chip idle) */
 
 /*---------------------------------------------------------------*
  * Entry points                                                  *
