@@ -10,6 +10,8 @@ pip install pyusb
 
 python3 host/nor_id.py            # 默认 6 MHz SPI
 python3 host/nor_id.py --div 8    # 3 MHz，杜邦线较长时更稳
+python3 host/nor_id.py --mode 3   # SPI mode 3（部分器件需要）
+python3 host/nor_id.py --status   # 只读 EP0 固件状态，不碰 bulk
 python3 host/nor_id.py -v         # 打印收发的原始 USB 帧
 ```
 
@@ -19,12 +21,27 @@ python3 host/nor_id.py -v         # 打印收发的原始 USB 帧
 桥       : 固件 v1.0, 协议 v1
 SPI      : mode 0, SCK = 6.0 MHz (div=4)
 
-JEDEC ID : EF 40 18 00
+JEDEC ID : EF 40 16 00
 厂商     : Winbond (0xEF)
 类型     : 0x40
-容量     : 0x18 -> 16 MB (128 Mbit)
+容量     : 0x16 -> 4 MB (32 Mbit)
 扩展字节 : 0x00（厂商自定义，部分型号为设备 ID）
 ```
+
+`--status` 输出示例（bulk 不工作时用它判断固件是否活着）：
+
+```
+桥       : 固件 v1.0, 协议 v1
+寄存器   : UEP2_3_MOD=95 UEP2_CTRL=02 UEP3_CTRL=02 UEP3_DMA_L=40
+主循环   : tick=2856 phase=0 cmd=0x00
+中断计数 : isr=157 setup=50 out=0 in=0
+端点状态 : frame_ready=0 had_frame=0 frame_len=0 rx_half=0 in=0x00
+回包状态 : reply_len=0 reply_off=0 in_pre_len=0
+控制     : USB_CTRL=29 UDEV_CTRL=A1
+```
+
+各字段含义与判定方法见 [`../docs/protocol.md`](../docs/protocol.md) §2.3
+和 [`../docs/handover.md`](../docs/handover.md) §7。
 
 接线异常时会直接提示原因，例如：
 
@@ -50,6 +67,7 @@ JEDEC ID : FF FF FF FF
 | `cs(level)` | `CMD_CS`，软件片选 |
 | `xfer(data)` | `CMD_SPI_XFER`，全双工交换 |
 | `jedec_id()` | 用 `0x9F` 读 4 字节 ID |
+| `vendor_status()` | `0xC0/0x42` 读 32 字节固件状态，**不经过 bulk** |
 
 完整的帧格式和命令表见 [`../docs/protocol.md`](../docs/protocol.md)。
 

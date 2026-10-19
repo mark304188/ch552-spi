@@ -56,7 +56,7 @@
 #define CMD_PING 0x01        /* -> PING_REPLY_LEN bytes            */
 #define CMD_GET_INFO 0x02    /* -> INFO_LEN bytes                  */
 #define CMD_GET_CAPS 0x03    /* -> CAPS_LEN bytes                  */
-#define CMD_SET_SPI_CFG 0x04 /* payload [div][mode3]  (no reply)   */
+#define CMD_SET_SPI_CFG 0x04 /* payload [div][mode3] -> 1 byte      */
 #define CMD_GET_SPI_CFG 0x05 /* -> 3 bytes                         */
 
 /* Chip-select control.  CS is software driven so a multi-command flash

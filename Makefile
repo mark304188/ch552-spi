@@ -7,7 +7,7 @@
 #
 # Flashing uses the WCH ISP protocol:
 #   - the stock WCHISPTool (Windows), or
-#   - the open-source tools on Linux/macOS: librech551, ch552tool.
+#   - the open-source ch55xtool on Linux/macOS (make flash).
 
 PROJECT := ch552_spi_bridge
 
@@ -64,6 +64,9 @@ CFLAGS += -DBOOTLOADER_ENTRY=0x3800
 ifdef ALLOW_OVERCLOCK
 CFLAGS += -DALLOW_OVERCLOCK=1
 endif
+
+# Free-form extra flags, e.g. make EXTRA_FLAGS=-DDE_PRINTF=1 for UART debug.
+CFLAGS += $(EXTRA_FLAGS)
 
 RELS := $(C_FILES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.rel)
 HDRS := $(wildcard $(INC_DIR)/*.h)

@@ -47,9 +47,22 @@ Linux 下用 libusb/usbfs 即可，无需内核驱动。接口协议见
 │       └── debug.c             时钟配置、延时
 ├── docs/
 │   ├── protocol.md             上位机接口文档（协议规范）
-│   └── hardware.md             引脚、接线、供电说明
-└── toolchain/                  （可选）本地 SDCC，见下
+│   ├── hardware.md             引脚、接线、供电说明
+│   └── handover.md             交接说明：现状、坑、下一步
+└── host/
+    ├── nor_id.py               最简 JEDEC ID 探测工具
+    ├── README.md               工具用法与可复用的 Bridge 类
+    └── 99-ch552-spi.rules      udev 规则（免 root 访问）
 ```
+
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/protocol.md`](docs/protocol.md) | 上位机接口规范：帧格式、命令表、时序与示例 |
+| [`docs/hardware.md`](docs/hardware.md) | 引脚、接线、供电与信号完整性 |
+| [`docs/handover.md`](docs/handover.md) | **交接说明**：现状、设计取舍、踩过的坑、下一步 |
+| [`host/README.md`](host/README.md) | 上位机工具用法与可复用的 `Bridge` 类 |
 
 ## 编译
 
@@ -79,16 +92,17 @@ build/ch552_spi_bridge.hex   Intel HEX，用 WCHISPTool 烧录
 build/ch552_spi_bridge.bin   原始二进制，用 ch552tool / librech551 烧录
 ```
 
-当前固件约 3.8 KB（可用 14 KB），RAM 使用：xRAM 端点缓冲固定占
-0x0000–0x01FF，编译器 xdata 512 B，iRAM 剩余约 190 B 栈空间。
+当前固件约 4.7 KB（可用 14 KB）。RAM：xRAM 端点缓冲固定占
+0x0000–0x01FF（EP0 64B + EP3 双 64B + EP2 双 64B + 192B 回包暂存），
+编译器 xdata 从 0x0200 起 512 B，iRAM 留约 158 B 栈空间。
 
 ### 烧录
 
 * Windows：WCHISPTool（WCH 官网），选择 `build/ch552_spi_bridge.hex`。
-* Linux / macOS：
+* Linux / macOS（开源工具 `ch55xtool`）：
   ```bash
-  pip install ch552tool
-  ch552tool flash -f build/ch552_spi_bridge.bin
+  pip install ch55xtool
+  make flash            # 等价于 ch55xtool -f build/...bin -r
   ```
   （或者使用 `librech551`、`wchisp`。）
 
@@ -129,12 +143,16 @@ CH552 编程器板：
 | Bulk OUT | `0x03`，64 字节 |
 | Bulk IN  | `0x82`，64 字节 |
 
-Linux 下建议加一条 udev 规则，免 root：
+Linux 下装一次 udev 规则即可免 root（仓库里已带该文件）：
 
+```bash
+sudo cp host/99-ch552-spi.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+# 然后拔插一次设备
 ```
-# /etc/udev/rules.d/99-ch552-spi.rules
-SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="5507", MODE="0666"
-```
+
+规则内容是给 `plugdev` 组读写权限（`MODE="0660", GROUP="plugdev"`）。
 
 Windows 下用 Zadig 给该接口绑定 WinUSB（或 libusbK），之后 libusb 的
 Windows 后端即可直接使用；因为接口是厂商自定义类，不会与任何系统驱动
@@ -194,6 +212,22 @@ print("id", r[2:5].hex())                  # r[1] 是发送 0x9F 时的无效字
 * USB 全速 bulk 是真正的瓶颈（理论上限约 1.06 MB/s，实际 0.5–0.9 MB/s）。
 * 页编程/页读取用流式命令，单个 256 B 页 = 1 个命令帧 + 4 个数据帧。
 * NOR/NAND 的擦除、编程时间由芯片本身决定，固件只负责不引入额外等待。
+
+## 实测记录
+
+在常见 CH552 SPI 编程器板（`/WP`=P3.2、`/HOLD`=P3.4）上验证：
+
+| 项目 | 结果 |
+|---|---|
+| 枚举 | `1a86:5507`，厂商自定义接口，Linux 免驱 |
+| JEDEC ID @ 6 MHz | `EF 40 16` → Winbond W25Q32（4 MB / 32 Mbit） |
+| JEDEC ID @ 12 MHz | 同上（SPI 最高时钟可用） |
+| RDSR | `0x00`（WIP=0、WEL=0） |
+| 读地址 0 | 全 `0xFF`（空片），重复读取一致 |
+
+尚未在硬件上验证：页编程/擦除/校验、SPI NAND、`CMD_STREAM_*` 大数据流、
+Windows 下的 WinUSB 绑定。上述待办与调试方法见
+[`docs/handover.md`](docs/handover.md)。
 
 ## 版本
 

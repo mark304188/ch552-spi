@@ -262,7 +262,7 @@ WSON8 没有这个脚；等待内部操作完成用 `GET FEATURE (0F C0)` 轮询
    芯片直接进 bootloader。
 
 注意：CH552 的 bootloader 位于 `0x3800–0x3FFF`（2 KB），用户程序区为
-`0x0000–0x37FF`（14 KB）。本固件约 3.8 KB。
+`0x0000–0x37FF`（14 KB）。本固件约 4.7 KB。
 
 ## 8. 电流/功耗参考
 

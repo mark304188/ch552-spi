@@ -20,8 +20,8 @@
 | 端点 `0x82` | Bulk IN，`wMaxPacketSize = 64` |
 | 端点 `0x03` | Bulk OUT，`wMaxPacketSize = 64` |
 
-设备只有标准控制请求，没有 class/vendor 控制请求，也没有 HID/CDC
-之类的复合接口，所以不会被系统驱动占用。
+设备除标准控制请求外只实现了一个 vendor 控制请求（`bRequest=0x42`，
+见 2.3），没有 HID/CDC 之类的复合接口，所以不会被系统驱动占用。
 
 ### 1.1 Linux
 
@@ -33,10 +33,19 @@ libusb_open(dev, &h);
 libusb_claim_interface(h, 0);
 ```
 
-建议 udev 规则（免 root）：
+仓库里带了一条 udev 规则（`host/99-ch552-spi.rules`，给 `plugdev` 组
+读写权限）：
+
+```bash
+sudo cp host/99-ch552-spi.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+规则内容：
 
 ```
-SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="5507", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="5507", \
+    MODE="0660", GROUP="plugdev"
 ```
 
 ### 1.2 Windows
@@ -111,9 +120,9 @@ bulk 端点的情况下确认固件版本和端点寄存器状态。上位机排
 | `bmRequestType` | `0xC0`（IN，vendor，device） |
 | `bRequest` | `0x42` |
 | `wValue` / `wIndex` | `0` / `0` |
-| `wLength` | 16 |
+| `wLength` | 32（前 16 字节是稳定部分，可只读 16） |
 
-返回 16 字节：
+返回 32 字节：
 
 | 偏移 | 内容 |
 |---|---|
@@ -126,13 +135,30 @@ bulk 端点的情况下确认固件版本和端点寄存器状态。上位机排
 | 9 | `UEP3_DMA_L` |
 | 10 | `ep3_frame_ready` |
 | 11 | `rx_half` |
-| 12 | `in_half` / `in_armed` / `in_pre_len` 位域 |
+| 12 | `in_half`(bit0) / `in_armed`(bit1) / `in_pre_len`(bit2) |
 | 13 | `USB_CTRL` |
 | 14 | `UDEV_CTRL` |
-| 15 | 保留 |
+| 15 | `ep3_had_frame` |
+| 16 | `ep3_frame_len` |
+| 17 | `reply_len` |
+| 18 | `reply_off` |
+| 19 | `in_pre_len` |
+| 20 | 最近一次 OUT 的 `USB_RX_LEN` |
+| 21..22 | 主循环 tick（小端 16 位） |
+| 23 | USB 中断计数 |
+| 24 / 25 / 26 | EP3 OUT / EP2 IN / EP0 SETUP 计数 |
+| 27 | 最近处理的命令码 |
+| 28 | 主循环阶段（0=空闲，1=处理命令中，2=命令返回后） |
+| 29..31 | 保留 |
 
 固件不支持该请求时会 STALL。旧版本固件（没有这个请求）也会 STALL，
 因此可以拿它区分"固件太旧"和"接线/硬件问题"。
+
+**用法**：如果 bulk 命令没有响应，先读这个请求。
+
+* `tick` 在增长 → 主循环正常，看 `阶段/命令码` 定位卡住的命令
+* `tick` 不动而 `中断计数` 在涨 → 主循环被中断饿死
+* 请求直接 STALL → 芯片里不是当前固件
 
 ---
 
@@ -217,8 +243,6 @@ capability 位：
 
 设置 SPI 时钟与模式。
 
-* 回包：1 字节 `status`（`ST_OK` / `ST_PARAM`）。
-
 * payload：`[div][mode3]`
   * `div`：SPI0 分频系数，**`SCK = Fsys / div`**。最小有效值 2（即 Fsys/2）。
     固件默认 `Fsys = 24 MHz`，此时常用值：
@@ -237,7 +261,8 @@ capability 位：
     mode 1/2 不支持。
 * 位序固定为 MSB first。
 * 注意：该命令会重新初始化 SPI 引脚，若当前 CS 被拉低会被释放。
-* 回包只表示参数合法，不表示时钟已稳定（硬件分频是立即生效的）。
+* 回包：1 字节 `status`（`ST_OK` / `ST_PARAM`）。只表示参数合法，
+  不表示时钟已稳定（硬件分频立即生效）。
 
 推荐上电后先执行一次 `SET_SPI_CFG(4, 0)`，或在识别到 Flash 后再提速。
 
@@ -303,7 +328,7 @@ capability 位：
 含义：`CMD_STREAM_WRITE`，后面跟 0x100 = 256 字节数据，先发送
 `02 00 01 23`（页编程命令 + 24 位地址）。
 
-随后主机连续发送 4 个 64 字节的 OF 帧（共 256 字节）。设备在收到
+随后主机连续发送 4 个 64 字节的 OUT 帧（共 256 字节）。设备在收到
 最后一个字节后释放 CS，并回一个状态字节。
 
 例：NOR 读（256 字节，地址 0x000123，命令 `03`）
@@ -394,13 +419,23 @@ capability 位：
 ### 6.1 读 JEDEC ID
 
 ```
-CMD_SET_SPI_CFG [04 00]          -> 1     # 6 MHz，mode 0
-CMD_CS [00]                               # 拉低 CS（无回包）
-CMD_SPI_XFER [9F 00 00 00]       -> 5     # status + 4 字节 MISO
+CMD_SET_SPI_CFG [04 00]                  -> 1     # 6 MHz，mode 0
+CMD_CS [00]                                       # 拉低 CS（无回包）
+CMD_SPI_XFER [9F FF FF FF FF]            -> 6     # status + 5 字节 MISO
 CMD_CS [01]
 ```
 
-回包的 `r[1..3]` 是厂商 / 型号 / 容量。
+回包 `r[0]` 是 status，`r[1..]` 是 MISO。发送 `9F` 的那个字节期间
+MISO 还是高阻（`r[1]` 无效），所以：
+
+| 字节 | 含义 |
+|---|---|
+| `r[2]` | 厂商 ID |
+| `r[3]` | 型号/类型 |
+| `r[4]` | 容量（log2 字节数） |
+| `r[5]` | 扩展字节（厂商自定义） |
+
+`host/nor_id.py` 就是这么解析的：`jdec = rx[1:]`（`rx` 已去掉 status）。
 
 ### 6.2 SPI NAND 页读（2 KB 页）
 
@@ -413,7 +448,8 @@ loop:
   CMD_CS [00]
   CMD_SPI_XFER [0F C0 00]                          -> 4    # status + 3 字节
   CMD_CS [01]
-  until (r[1] & 0x01) == 0
+  until (r[3] & 0x01) == 0        # r[1] 是发 0F 时的无效字节，
+                                  # r[2] 是地址字节，r[3] 才是 feature
 
 # 3) READ FROM CACHE (03h) + 2 字节列地址 + 1 dummy，读出 2048+64 字节
 CMD_STREAM_READ count=2112 pre=[03, 00, 00, 00]    -> 2112 + 1
@@ -441,9 +477,10 @@ CMD_STREAM_WRITE count=0   pre=[05, 00]             -> 1   # 占位读状态
 
 ```
 CMD_CS [00]
-CMD_SPI_XFER [05 00]                                -> 3   # status + SR + 1
+CMD_SPI_XFER [05 00]                                -> 3   # status + 2 字节
 CMD_CS [01]
-# r[1] & 0x01 为 1 表示 WIP（内部忙）
+# r[1] 是发 05 期间的无效字节，r[2] 才是状态寄存器
+# r[2] & 0x01 为 1 表示 WIP（内部忙）
 ```
 
 也可以把 WREN 和页编程拆成独立片选周期（更接近数据手册时序）：
