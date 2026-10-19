@@ -16,6 +16,10 @@ build/
 # Local toolchain (optional, fetched by hand)
 toolchain/
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Editor / OS noise
 .vscode/
 .idea/

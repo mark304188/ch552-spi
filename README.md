@@ -138,24 +138,48 @@ Windows 下用 Zadig 给该接口绑定 WinUSB（或 libusbK），之后 libusb 
 Windows 后端即可直接使用；因为接口是厂商自定义类，不会与任何系统驱动
 冲突。
 
-### 最小示例（Python + pyusb）
+### 现成的探测工具
+
+[`host/nor_id.py`](host/nor_id.py) 是一个单文件示例：读 JEDEC ID、解析
+厂商与容量，并对"没接芯片 / 接线错误"给出诊断。
+
+```bash
+pip install pyusb
+python3 host/nor_id.py            # 默认 6 MHz
+python3 host/nor_id.py --div 8    # 3 MHz，线长时更稳
+```
+
+```
+桥       : 固件 v1.0, 协议 v1
+SPI      : mode 0, SCK = 6.0 MHz (div=4)
+
+JEDEC ID : EF 40 18 00
+厂商     : Winbond (0xEF)
+容量     : 0x18 -> 16 MB (128 Mbit)
+```
+
+### 自己实现的起点
+
+命令帧是 `[cmd][len][payload]`，回包是 `[status][data]`。最小交互：
 
 ```python
 import usb.core, usb.util
 
 dev = usb.core.find(idVendor=0x1A86, idProduct=0x5507)
-dev.set_configuration()
 usb.util.claim_interface(dev, 0)
-
 EP_OUT, EP_IN = 0x03, 0x82
 
-def cmd(payload, reply=0):
-    dev.write(EP_OUT, bytes(payload), 1000)
-    return dev.read(EP_IN, reply, 1000) if reply else None
+def send(cmd, payload=b""):
+    dev.write(EP_OUT, bytes([cmd, len(payload)]) + payload, 1000)
 
-# 读 JEDEC ID：CMD_SPI_XFER，长度 4，数据 9F 00 00 00
-r = cmd([0x11, 0x04, 0x9F, 0x00, 0x00, 0x00], 5)
-print("status", r[0], "id", r[1:].hex())
+def recv(n):
+    return bytes(dev.read(EP_IN, n, 1000))
+
+send(0x08, b"\x00")                       # CMD_CS: 拉低片选
+send(0x11, b"\x9F\xFF\xFF\xFF\xFF")      # CMD_SPI_XFER: 0x9F + 4 字节时钟
+r = recv(6)                                # status + 5 字节 MISO
+send(0x08, b"\x01")                       # CMD_CS: 释放
+print("id", r[2:5].hex())                  # r[1] 是发送 0x9F 时的无效字节
 ```
 
 ## 性能
