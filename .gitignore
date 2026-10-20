@@ -16,6 +16,9 @@ build/
 # Local toolchain (optional, fetched by hand)
 toolchain/
 
+# Nested clone, fetched by hand
+/host/ufprog/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -25,3 +28,4 @@ __pycache__/
 .idea/
 *.swp
 .DS_Store
+
