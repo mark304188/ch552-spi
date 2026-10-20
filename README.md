@@ -225,8 +225,8 @@ print("id", r[2:5].hex())                  # r[1] 是发送 0x9F 时的无效字
   | 路径 | 写入 | 擦除 |
   |---|---|---|
   | 主机逐页（`CMD_STREAM_WRITE`） | 10 KiB/s | 72 KiB/s |
-  | 固件内循环 6 MHz | 149 KiB/s | 126 KiB/s |
-  | 固件内循环 12 MHz | **188 KiB/s** | 126 KiB/s |
+  | 固件内循环 6 MHz | 183 KiB/s | 126 KiB/s |
+  | 固件内循环 12 MHz | **205 KiB/s** | 126 KiB/s |
 
 * SPI NAND（DS35M1GA，1.8V，2048+64，无 ECC）实测（Windows/WinUSB，
   1 MiB 校验通过）：
@@ -252,7 +252,7 @@ print("id", r[2:5].hex())                  # r[1] 是发送 0x9F 时的无效字
 | JEDEC ID @ 12 MHz | 同上（SPI 最高时钟可用） |
 | RDSR | `0x00`（WIP=0、WEL=0） |
 | 读地址 0 | 全 `0xFF`（空片），重复读取一致 |
-| 固件加速写入 | 1 MiB @ 12 MHz，188 KiB/s，校验通过 |
+| 固件加速写入 | 64 KiB @ 12 MHz，205 KiB/s，校验通过 |
 
 尚未在硬件上验证：页编程/擦除/校验、SPI NAND、`CMD_STREAM_*` 大数据流、
 Windows 下的 WinUSB 绑定。上述待办与调试方法见
