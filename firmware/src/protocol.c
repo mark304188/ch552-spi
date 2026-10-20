@@ -352,30 +352,43 @@ static void nor_wren(void)
     CS_DEASSERT();
 }
 
-/* Wait for WIP to rise (a few parts need some microseconds after CS
- * rises) and then to fall.  Returns 0 if it never clears. */
+/* nor_wait_ready() results. */
+#define WAIT_OK 1
+#define WAIT_TIMEOUT 0
+#define WAIT_NOT_STARTED 2
+
+/* Wait for WIP to rise, then to fall.
+ *
+ * The first loop is short on purpose: a program/erase command that the
+ * chip ignores (WP# low, protected block, no chip) never sets WIP, and
+ * pretending it completed would silently drop the write.  A real
+ * operation sets WIP within a few microseconds, so 32 polls (~100 us)
+ * is a wide margin. */
 static uint8_t nor_wait_ready(void)
 {
     uint16_t spins;
 
-    for (spins = 0; spins < 2000; spins++) {
+    for (spins = 0; spins < 32; spins++) {
         if (nor_sr() & 0x01) {
             break;
         }
     }
+    if (spins == 32) {
+        return WAIT_NOT_STARTED;
+    }
     acc_budget = 1000000UL;
     while (acc_budget--) {
         if (!(nor_sr() & 0x01)) {
-            return 1;
+            return WAIT_OK;
         }
     }
-    return 0;
+    return WAIT_TIMEOUT;
 }
 
 /* Program acc_total bytes starting at acc_addr.  Pages are never crossed. */
 static uint8_t nor_program(void)
 {
-    uint8_t n;
+    uint8_t n, st;
 
     while (acc_total) {
         acc_left = 256UL - (acc_addr & 0xFFUL);
@@ -415,8 +428,9 @@ static uint8_t nor_program(void)
         }
         CS_DEASSERT();
 
-        if (!nor_wait_ready()) {
-            return ST_BUSY;
+        st = nor_wait_ready();
+        if (st != WAIT_OK) {
+            return (st == WAIT_TIMEOUT) ? ST_BUSY : ST_ERR;
         }
     }
     return spi_bus_ok ? ST_OK : ST_ERR;
@@ -424,6 +438,8 @@ static uint8_t nor_program(void)
 
 static uint8_t nor_erase(void)
 {
+    uint8_t st;
+
     while (acc_total) {
         nor_wren();
         CS_ASSERT();
@@ -433,8 +449,9 @@ static uint8_t nor_erase(void)
         spi_put((uint8_t)acc_addr);
         CS_DEASSERT();
 
-        if (!nor_wait_ready()) {
-            return ST_BUSY;
+        st = nor_wait_ready();
+        if (st != WAIT_OK) {
+            return (st == WAIT_TIMEOUT) ? ST_BUSY : ST_ERR;
         }
         acc_addr += 4096UL;
         acc_total -= 4096UL;
@@ -467,17 +484,24 @@ static uint8_t nand_feature(uint8_t reg)
     return v;
 }
 
-/* Returns the status register once OIP clears, 0xFF on timeout. */
+/* Returns the status register once OIP clears.
+ * 0xFE = the command never started (OIP never rose), 0xFF = timeout. */
+#define NAND_ST_NOT_STARTED 0xFE
+#define NAND_ST_TIMEOUT 0xFF
+
 static uint8_t nand_wait_ready(void)
 {
     uint16_t spins;
     uint8_t st;
 
-    for (spins = 0; spins < 2000; spins++) {
+    for (spins = 0; spins < 32; spins++) {
         st = nand_feature(NAND_FEATURE_STATUS);
         if (st & NAND_ST_OIP) {
             break;
         }
+    }
+    if (spins == 32) {
+        return NAND_ST_NOT_STARTED;
     }
     acc_budget = 2000000UL;
     while (acc_budget--) {
@@ -486,7 +510,7 @@ static uint8_t nand_wait_ready(void)
             return st;
         }
     }
-    return 0xFF;
+    return NAND_ST_TIMEOUT;
 }
 
 /* 0x13 PAGE READ or 0x10 PROGRAM EXECUTE: opcode + 24 bit page address. */
@@ -507,7 +531,7 @@ static uint8_t nand_read_pages(void)
     while (acc_total) {
         nand_cmd_page(0x13, acc_addr);
         st = nand_wait_ready();
-        if (st == 0xFF || (st & NAND_ST_FAIL)) {
+        if (st >= NAND_ST_NOT_STARTED || (st & NAND_ST_FAIL)) {
             return ST_ERR;
         }
 
@@ -535,7 +559,7 @@ static uint8_t nand_read_pages(void)
 
 static uint8_t nand_program_pages(void)
 {
-    uint8_t n;
+    uint8_t n, st;
 
     while (acc_total) {
         CS_ASSERT();
@@ -571,7 +595,8 @@ static uint8_t nand_program_pages(void)
         CS_DEASSERT();
 
         nand_cmd_page(0x10, acc_addr);
-        if (nand_wait_ready() & NAND_ST_FAIL) {
+        st = nand_wait_ready();
+        if (st >= NAND_ST_NOT_STARTED || (st & NAND_ST_FAIL)) {
             return ST_ERR;
         }
         acc_addr++;

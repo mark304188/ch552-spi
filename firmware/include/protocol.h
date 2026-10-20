@@ -145,7 +145,7 @@
 
 /* Firmware version, reported by CMD_GET_INFO and the EP0 status query. */
 #define FW_VER_MAJOR 1
-#define FW_VER_MINOR 1
+#define FW_VER_MINOR 2
 
 /* Magic bytes returned by CMD_PING: ASCII "CSP". */
 #define PING_MAGIC0 'C'
