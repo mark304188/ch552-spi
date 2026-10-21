@@ -11,6 +11,9 @@
 
 PROJECT := ch552_spi_bridge
 
+# The config stamp rule is defined before `all`; keep the default goal explicit.
+.DEFAULT_GOAL := all
+
 # Supply voltage.  The CH552 datasheet (table 8.2.2) requires VCC > 4.4 V
 # for 24 MHz; a 3.3 V board must run at 12 MHz (16 MHz is marginal).
 # An explicit FREQ_SYS=... on the command line still wins.
@@ -81,14 +84,25 @@ CFLAGS += $(EXTRA_FLAGS)
 RELS := $(C_FILES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.rel)
 HDRS := $(wildcard $(INC_DIR)/*.h)
 
-.PHONY: all flash clean
+# make does not track CFLAGS, so switching FREQ_SYS/VCC used to reuse stale
+# objects and silently produce a binary for the old clock.  Keep the flags in
+# a stamp file and make every object depend on it.
+CFG_STAMP := $(BUILD_DIR)/.config
+
+.PHONY: all flash clean FORCE
+
+FORCE:
+
+$(CFG_STAMP): FORCE
+	@mkdir -p $(BUILD_DIR)
+	@echo '$(CC) $(CFLAGS)' | cmp -s - $@ || echo '$(CC) $(CFLAGS)' > $@
 
 all: $(BUILD_DIR)/$(PROJECT).bin $(BUILD_DIR)/$(PROJECT).hex
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(BUILD_DIR)/%.rel: $(SRC_DIR)/%.c $(HDRS) | $(BUILD_DIR)
+$(BUILD_DIR)/%.rel: $(SRC_DIR)/%.c $(HDRS) $(CFG_STAMP) | $(BUILD_DIR)
 	$(SDCC) -c $(CFLAGS) -o $@ $<
 
 $(BUILD_DIR)/$(PROJECT).ihx: $(RELS)
