@@ -11,10 +11,20 @@
 
 PROJECT := ch552_spi_bridge
 
-# System clock. 24MHz gives the highest SPI rate the peripheral can
-# sustain and leaves plenty of headroom for the USB full-speed device
-# requirement (Fsys >= 6MHz).
+# Supply voltage.  The CH552 datasheet (table 8.2.2) requires VCC > 4.4 V
+# for 24 MHz; a 3.3 V board must run at 12 MHz (16 MHz is marginal).
+# An explicit FREQ_SYS=... on the command line still wins.
+VCC ?= 5V
+ifeq ($(VCC),3V3)
+FREQ_SYS ?= 12000000
+ifneq ($(filter-out 6000000 12000000,$(FREQ_SYS)),)
+$(error VCC=3V3 supports only FREQ_SYS=6/12 MHz, got $(FREQ_SYS))
+endif
+else
 FREQ_SYS ?= 24000000
+endif
+
+$(info Build: VCC=$(VCC), Fsys=$(FREQ_SYS) Hz, SPI max $(shell expr $(FREQ_SYS) / 2000000) MHz)
 
 # 14KB of user flash (16KB ROM minus the 2KB bootloader at 0x3800).
 CODE_SIZE ?= 0x3800
