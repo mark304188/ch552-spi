@@ -51,9 +51,18 @@ void CfgFsys(void)
     SAFE_MOD = 0x00;
 }
 
-/* Rough microsecond delay.  Each SAFE_MOD increment costs 2 Fsys cycles
- * (as documented by the vendor SDK), and the loop itself costs a few
- * more, so ~24 cycles per iteration at 24 MHz gives roughly 1 us. */
+/* Rough microsecond delay.
+ *
+ * NOTE: the WCH/Keil SDK uses SAFE_MOD++ as a 2-cycle delay element because
+ * Keil emits a single "INC direct".  SDCC does not: it generates
+ *     mov a,_SAFE_MOD / inc a / mov _SAFE_MOD,a
+ * which costs about 5 Fsys cycles, and the loop adds ~10 more.  The real
+ * delay is therefore roughly 2x the nominal value at 24 MHz and ~3x at
+ * 6 MHz (the loop overhead does not scale with Fsys).
+ *
+ * Only used for "wait at least this long" cases (oscillator settle,
+ * bootloader entry).  Do not use it for precise bus timing - use a timer
+ * or inline NOPs instead. */
 void mDelayuS(uint16_t n)
 {
     while (n--) {
