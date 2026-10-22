@@ -40,8 +40,7 @@ JEDEC ID : EF 40 16 00
 控制     : USB_CTRL=29 UDEV_CTRL=A1
 ```
 
-各字段含义与判定方法见 [`../docs/protocol.md`](../docs/protocol.md) §2.3
-和 [`../docs/handover.md`](../docs/handover.md) §7。
+各字段含义与判定方法见 [`../docs/protocol.md`](../docs/protocol.md) §2.3。
 
 接线异常时会直接提示原因，例如：
 

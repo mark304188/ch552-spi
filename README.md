@@ -47,8 +47,7 @@ Linux 下用 libusb/usbfs 即可，无需内核驱动。接口协议见
 │       └── debug.c             时钟配置、延时
 ├── docs/
 │   ├── protocol.md             上位机接口文档（协议规范）
-│   ├── hardware.md             引脚、接线、供电说明
-│   └── handover.md             交接说明：现状、坑、下一步
+│   └── hardware.md             引脚、接线、供电说明
 └── host/
     ├── nor_id.py               最简 JEDEC ID 探测工具
     ├── README.md               工具用法与可复用的 Bridge 类
@@ -61,7 +60,6 @@ Linux 下用 libusb/usbfs 即可，无需内核驱动。接口协议见
 |---|---|
 | [`docs/protocol.md`](docs/protocol.md) | 上位机接口规范：帧格式、命令表、时序与示例 |
 | [`docs/hardware.md`](docs/hardware.md) | 引脚、接线、供电与信号完整性 |
-| [`docs/handover.md`](docs/handover.md) | **交接说明**：现状、设计取舍、踩过的坑、下一步 |
 | [`host/README.md`](host/README.md) | 上位机工具用法与可复用的 `Bridge` 类 |
 
 ## 编译
@@ -254,9 +252,8 @@ print("id", r[2:5].hex())                  # r[1] 是发送 0x9F 时的无效字
 | 读地址 0 | 全 `0xFF`（空片），重复读取一致 |
 | 固件加速写入 | 64 KiB @ 12 MHz，205 KiB/s，校验通过 |
 
-尚未在硬件上验证：页编程/擦除/校验、SPI NAND、`CMD_STREAM_*` 大数据流、
-Windows 下的 WinUSB 绑定。上述待办与调试方法见
-[`docs/handover.md`](docs/handover.md)。
+页编程/擦除/校验、SPI NAND、ECC 均已在硬件上验证；尚未验证的是坏块
+替换、4 字节地址 NOR、x2/x4 模式和长时间稳定性。
 
 ## 版本
 
