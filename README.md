@@ -269,3 +269,11 @@ Windows 下的 WinUSB 绑定。上述待办与调试方法见
   定义与 USB 设备例程的写法参考）
 * <https://github.com/SoCXin/CH552> — CH552 资料汇总与官方 SDK 工程
 * CH552/CH551 数据手册（WCH）
+
+## 许可证
+
+本项目采用 **GNU Affero General Public License v3.0**，全文见
+[`LICENSE`](LICENSE)。
+
+第三方依赖保持各自许可证：pyusb（BSD-3-Clause）、libusb（LGPL-2.1，
+动态链接）、SDCC（编译器，不作用于生成的固件）。
