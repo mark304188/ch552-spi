@@ -253,13 +253,13 @@ WSON8 没有这个脚；等待内部操作完成用 `GET FEATURE (0F C0)` 轮询
 
 ## 7. 固件升级
 
-两种方式：
+按住 BOOT 键（或短接 P3.6 到 3.3 V 的特定组合）后上电，芯片直接进入
+WCH bootloader（VID:PID = `4348:55E0`），然后用 WCHISPTool / ch55xtool
+烧录。
 
-1. **USB bootloader 热跳转**：上位机发 `CMD_BOOTLOADER`，设备重新枚举为
-   WCH bootloader（VID:PID = `4348:55E0`），然后用 WCHISPTool /
-   ch552tool 烧录。
-2. **冷启动**：按住 BOOT 键（或短接 P3.6 到 3.3 V 的特定组合）后上电，
-   芯片直接进 bootloader。
+> 1.2 及更早的固件实现过 `CMD_BOOTLOADER` 软件跳转，但实测不可靠：
+> 跳转后不枚举，而且出现过**没有发送该命令却自行跳到烧录模式**的情况。
+> 1.3 已把这条命令和跳转代码整体移除，升级只能按 BOOT。
 
 注意：CH552 的 bootloader 位于 `0x3800–0x3FFF`（2 KB），用户程序区为
 `0x0000–0x37FF`（14 KB）。本固件约 4.7 KB。

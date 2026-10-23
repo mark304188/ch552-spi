@@ -60,9 +60,8 @@ void CfgFsys(void)
  * delay is therefore roughly 2x the nominal value at 24 MHz and ~3x at
  * 6 MHz (the loop overhead does not scale with Fsys).
  *
- * Only used for "wait at least this long" cases (oscillator settle,
- * bootloader entry).  Do not use it for precise bus timing - use a timer
- * or inline NOPs instead. */
+ * Only used for "wait at least this long" cases (oscillator settle).
+ * Do not use it for precise bus timing - use a timer or inline NOPs. */
 void mDelayuS(uint16_t n)
 {
     while (n--) {

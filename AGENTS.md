@@ -60,7 +60,6 @@ make flash           # ch55xtool，需要板子先按住 BOOT 上电
 - 编译参数变了会自动重建（`build/.config` 时间戳），不需要 `make clean`
 - 烧录：Windows 用 WCHISPTool 烧 `build/ch552_spi_bridge.hex`；
   Linux 用 `make flash`（`pip install ch55xtool`）
-- 软件跳 bootloader（`CMD_BOOTLOADER`）目前不可用，必须按 BOOT
 
 ## 测试
 
@@ -143,7 +142,6 @@ bulk 没反应时先跑 `nor_id.py --status`：
 
 - 坏块替换策略（目前只检测并跳过）
 - 4 字节地址 NOR（>128 Mb）
-- `CMD_BOOTLOADER` 软件跳转（0x3800 后不枚举）
 - NAND x2/x4（CH552 SPI 只有单线）
 - 长时间擦写稳定性、断电恢复
 

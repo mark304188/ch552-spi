@@ -117,10 +117,6 @@
 #define CMD_GPIO_WRITE 0x30 /* payload [pin][value]  (no reply)    */
 #define CMD_GPIO_READ 0x31  /* payload [pin] -> 2 bytes            */
 
-/* Leave the application and re-enter the WCH USB bootloader so the
- * firmware can be updated without a programmer. */
-#define CMD_BOOTLOADER 0x40
-
 /*---------------------------------------------------------------*
  * Reply payload layouts                                         *
  *---------------------------------------------------------------*/
@@ -145,7 +141,7 @@
 
 /* Firmware version, reported by CMD_GET_INFO and the EP0 status query. */
 #define FW_VER_MAJOR 1
-#define FW_VER_MINOR 2
+#define FW_VER_MINOR 3
 
 /* Magic bytes returned by CMD_PING: ASCII "CSP". */
 #define PING_MAGIC0 'C'

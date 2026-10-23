@@ -67,10 +67,6 @@ CFLAGS := \
 	$(INCLUDES) \
 	--std-sdcc11 --opt-code-speed
 
-# Extra headroom for the bootloader entry symbol; keep it explicit so the
-# jump target is visible in the map file.
-CFLAGS += -DBOOTLOADER_ENTRY=0x3800
-
 # 32MHz is out of spec for the CH552 (marked "Reserved, disabled" since
 # datasheet V1.1) and does not improve throughput.  Kept as an explicit
 # opt-in for experiments only.

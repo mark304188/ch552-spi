@@ -103,7 +103,6 @@ python host\speedtest.py --size 4K -y
 | `未找到设备 1A86:5507` | 没绑定 WinUSB，或设备没插好 |
 | `无法占用接口 0: Access denied` | 被其他程序占用，或 Zadig 绑定后没拔插 |
 | `No backend available` | 缺 `libusb-1.0.dll`，装 `libusb-package` |
-| 烧录后设备消失 | 正常：`CMD_BOOTLOADER` 会让它变成 `4348:55E0` |
 
 注意：Windows 下每次 bulk 往返的延迟通常比 Linux 高，`speedtest.py` 的
 写入数字会受它影响；`--div` 对读吞吐的影响仍然成立。

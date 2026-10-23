@@ -27,8 +27,6 @@
 #include "usb.h"
 #include "protocol.h"
 
-void mDelaymS(uint16_t n);
-
 /* The reply staging buffer lives in usb.c with an absolute xRAM address.
  * It is declared here rather than in a header because SDCC rejects an
  * extern declaration that is followed by an __at() definition inside the
@@ -967,20 +965,6 @@ void proto_handle(uint8_t __xdata *frame, uint8_t n)
 
     case CMD_GPIO_READ:
         cmd_gpio_read(p, len);
-        break;
-
-    case CMD_BOOTLOADER:
-        /* Drop the USB port and hand control to the WCH bootloader. */
-        proto_reset();
-        EA = 0;
-        USB_INT_EN = 0;
-        USB_CTRL = bUC_RESET_SIE;
-        mDelaymS(20);
-#if defined(BOOTLOADER_ENTRY)
-        ((void (*)(void))BOOTLOADER_ENTRY)();
-#endif
-        while (1)
-            ;
         break;
 
     default:

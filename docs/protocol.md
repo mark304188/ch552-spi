@@ -185,7 +185,6 @@ bulk 端点的情况下确认固件版本和端点寄存器状态。上位机排
 | `0x27` | `CMD_NAND_PROGRAM_PAGES` | `[page24][npages16]` + 数据 | 4 字节 |
 | `0x30` | `CMD_GPIO_WRITE` | `[pin][value]`（0=WP, 1=HOLD） | 1 字节 |
 | `0x31` | `CMD_GPIO_READ` | `[pin]` | 2 字节 |
-| `0x40` | `CMD_BOOTLOADER` | — | 无（设备消失） |
 
 ---
 
@@ -393,14 +392,7 @@ capability 位：
 * payload：`[pin]`
 * 回包：`[status][level]`，`level` 为该引脚当前电平（0/1）
 
-### 4.13 `CMD_BOOTLOADER` (0x40)
-
-设备重新枚举为 WCH USB bootloader（`0x4348:0x55E0`），用于升级固件。
-无回包；执行后设备会从 USB 上消失。
-
----
-
-### 4.14 固件加速命令（NOR / NAND）
+### 4.13 固件加速命令（NOR / NAND）
 
 `CMD_STREAM_*` 是通用路径：主机逐页发命令，设备只负责搬运。代价是每页
 3~5 次 USB 往返（WREN、PP、轮询状态），在 USB 全速下这是写速的主要瓶颈。
@@ -645,8 +637,7 @@ CMD_STREAM_WRITE count=0 pre=[20, A2, A1, A0]       -> 1   # 4 KB 扇区擦除
   设备已经丢弃该帧，可以直接发下一条命令。
 * `ST_TIMEOUT` 只可能出现在流式命令中（主机在传输中途停止）。设备会
   释放 CS 并回到空闲状态，主机重新发起即可。
-* 如果设备运行异常，可以发 `CMD_BOOTLOADER` 重新进入 bootloader，或者
-  硬件复位。
+* 如果设备运行异常，硬件复位即可（升级固件需要按住 BOOT 重新上电）。
 
 ---
 
@@ -668,4 +659,4 @@ CMD_STREAM_WRITE count=0 pre=[20, A2, A1, A0]       -> 1   # 4 KB 扇区擦除
 
 | 协议版本 | 变更 |
 |---|---|
-| 1.0 | 初版：PING/INFO/CAPS、SPI 配置、CS 控制、缓冲与流式传输、GPIO、bootloader |
+| 1.0 | 初版：PING/INFO/CAPS、SPI 配置、CS 控制、缓冲与流式传输、GPIO |
