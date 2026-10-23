@@ -224,7 +224,9 @@ print("id", r[2:5].hex())                  # r[1] 是发送 0x9F 时的无效字
   |---|---|---|
   | 主机逐页（`CMD_STREAM_WRITE`） | 10 KiB/s | 72 KiB/s |
   | 固件内循环 6 MHz | 183 KiB/s | 126 KiB/s |
-  | 固件内循环 12 MHz | **205 KiB/s** | 126 KiB/s |
+  | 固件内循环 12 MHz | **250 KiB/s** | **122 KiB/s** |
+
+  12 MHz 下 NOR 读取约 **459 KiB/s**（Windows/WinUSB，校验通过）。
 
 * SPI NAND（DS35M1GA，1.8V，2048+64，无 ECC）实测（Windows/WinUSB，
   1 MiB 校验通过）：
@@ -250,7 +252,7 @@ print("id", r[2:5].hex())                  # r[1] 是发送 0x9F 时的无效字
 | JEDEC ID @ 12 MHz | 同上（SPI 最高时钟可用） |
 | RDSR | `0x00`（WIP=0、WEL=0） |
 | 读地址 0 | 全 `0xFF`（空片），重复读取一致 |
-| 固件加速写入 | 64 KiB @ 12 MHz，205 KiB/s，校验通过 |
+| 固件加速读写 | 64 KiB @ 12 MHz，写 250 / 读 459 KiB/s，校验通过 |
 
 页编程/擦除/校验、SPI NAND、ECC 均已在硬件上验证；尚未验证的是坏块
 替换、4 字节地址 NOR、x2/x4 模式和长时间稳定性。
