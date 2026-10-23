@@ -1,5 +1,7 @@
 # CH552 USB-SPI 桥（SPI NOR / SPI NAND 烧录器）
 
+> English version: [README_EN.md](README_EN.md)
+
 用 CH552（增强型 8051 + USB 全速设备）做的 USB 转 SPI 桥，主要用途是
 SPI NOR / SPI NAND Flash 的量产烧录、读取和校验。
 
@@ -25,7 +27,6 @@ Linux 下用 libusb/usbfs 即可，无需内核驱动。接口协议见
 * **软件控制 CS**，支持跨多个命令保持片选，适合 NOR/NAND 的多阶段时序
   （写使能 → 页编程 → 轮询状态）。
 * Linux 免驱（libusb / usbfs），Windows 侧可用 WinUSB（见下文）。
-* 可通过命令跳回 WCH 自带 USB bootloader 升级固件，不需要额外编程器。
 
 ## 目录结构
 
@@ -175,7 +176,7 @@ python3 host/nor_id.py --div 8    # 3 MHz，线长时更稳
 ```
 
 ```
-桥       : 固件 v1.0, 协议 v1
+桥       : 固件 v1.3, 协议 v1
 SPI      : mode 0, SCK = 6.0 MHz (div=4)
 
 JEDEC ID : EF 40 18 00
@@ -264,7 +265,7 @@ print("id", r[2:5].hex())                  # r[1] 是发送 0x9F 时的无效字
 
 ## 版本
 
-* 固件 1.0 / 协议 1.0
+* 固件 1.3 / 协议 1.0
 * 目标芯片：CH552（CH554 兼容，但本固件未使用 USB Host 功能）
 
 ## 参考
