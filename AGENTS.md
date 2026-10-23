@@ -81,10 +81,15 @@ python3 host/nand_speedtest.py --blocks 4 --div 2 --ecc host -y
 
 | | 写入 | 读取 |
 |---|---|---|
-| NOR 固件加速 | 205 KiB/s | 353–366 KiB/s |
+| NOR 固件加速 | 250 KiB/s | 459 KiB/s |
 | NAND 固件加速（Windows） | 434 KiB/s | 438 KiB/s |
 | NAND 固件加速（Linux VM） | 344 KiB/s | 352 KiB/s |
 | NAND + ECC（片上/主机 BCH） | ~430 KiB/s | ~430 KiB/s |
+
+> NAND 的数字是纯顺序读写，**不含坏块扫描**。实际烧录时 FTL/上位机要先
+> 读每块第 1/2 页 OOB 的坏块标记并跳过坏块（1 Gbit 共 1024 块，至少
+> 2048 次页读）；如果烧录前做全片扫描，这部分固定开销对小镜像尤其明显，
+> 实际有效速度会低于基线。
 
 USB 全速 bulk 是瓶颈（约 0.43 MiB/s），SPI 和 ECC 都不是。
 
